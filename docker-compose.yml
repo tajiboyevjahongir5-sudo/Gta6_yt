@@ -1,0 +1,12 @@
+services:
+  lahza:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - DATA_DIR=/data
+    volumes:
+      - ./data:/data
+    ports:
+      - "3000:3000"
+  # yt-dlp tez-tez yangilanadi (YouTube o'zgarganda). Haftada bir marta: docker compose exec lahza yt-dlp -U

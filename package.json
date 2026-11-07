@@ -1,0 +1,14 @@
+{
+  "name": "lahza",
+  "version": "0.1.0",
+  "description": "Lahza: uzun stream videolardan eng qiziq lahzalarni kesib, montaj qilib, YouTube kanalga avtomatik yuklaydigan Telegram bot + Web App",
+  "main": "server.js",
+  "private": true,
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning server.js"
+  },
+  "engines": { "node": ">=22.13" },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^1.6.0"
+  }
+}

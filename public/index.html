@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="uz">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Lahza</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand"><span class="logo">L</span><div><b>Lahza</b><small id="chName">kanal ulanmagan</small></div></div>
+  <button class="icon" id="btnSettings" aria-label="Sozlamalar">⚙️</button>
+</header>
+<main id="view"><div class="empty">Yuklanmoqda…</div></main>
+<nav class="tabs" id="tabs">
+  <button data-page="home" class="on"><i>🏠</i>Asosiy</button>
+  <button data-page="jobs"><i>⏳</i>Navbat</button>
+  <button data-page="clips"><i>🎬</i>Kliplar<em id="badgeDrafts"></em></button>
+  <button data-page="stats"><i>📊</i>Statistika</button>
+  <button data-page="sources"><i>📡</i>Manbalar</button>
+</nav>
+<div id="sheet" class="sheet hidden"><div class="sheet-body" id="sheetBody"></div></div>
+<div id="toast" class="toast hidden"></div>
+<div id="tip" class="tip hidden"></div>
+<script src="/app.js"></script>
+</body>
+</html>
