@@ -273,7 +273,8 @@ async function settings() {
   $('#view').innerHTML = `<h2>YouTube kanal</h2>
     <div class="card">${o.youtube.connected && o.channel && !o.channel.error
       ? `<div class="row">${o.channel.thumb ? `<img src="${esc(o.channel.thumb)}" style="width:44px;height:44px;border-radius:50%">` : ''}<div class="grow"><b>${esc(o.channel.title)}</b><div class="muted small">${num(o.channel.subscribers)} obunachi · ${o.channel.videos} video</div></div><button class="btn sm danger" id="ytoff">Uzish</button></div>`
-      : `<p class="muted small">${o.youtube.configured ? 'Kanalingizni ulang — videolar shu kanalga yuklanadi.' : 'Serverda GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET / PUBLIC_URL sozlanmagan (README).'}</p>${o.channel?.error ? `<div class="warnbox">${esc(o.channel.error)}</div>` : ''}<button class="btn primary" id="yton" ${o.youtube.configured ? '' : 'disabled'} style="width:100%">YouTube kanalni ulash</button>`}</div>
+      : `<p class="muted small">${o.youtube.configured ? 'Kanalingizni ulang — videolar shu kanalga yuklanadi.' : 'Birinchi marta: ilovani Google\'da ro\'yxatdan o\'tkazamiz (yo\'riqnoma ichida), keyin kanal ulanadi.'}</p>${o.channel?.error ? `<div class="warnbox">${esc(o.channel.error)}</div>` : ''}<button class="btn primary" id="yton" style="width:100%">${o.youtube.configured ? 'YouTube kanalni ulash' : 'YouTube\'ni sozlash va ulash'}</button>
+        ${o.youtube.configured ? '<p class="small" style="margin:8px 0 0"><a href="#" id="ytsetup" style="color:var(--muted)">Google kalitlarini o\'zgartirish</a></p>' : ''}`}</div>
     ${o.youtube.connected && !o.youtube.canBrand ? '<div class="warnbox">Brendni kanalga o\'rnatish uchun kanalni qayta ulang (yangi ruxsat kerak). <a href="#" id="reconn" style="color:inherit">Qayta ulash</a></div>' : ''}
     <div class="card"><div class="row"><div style="font-size:28px">🎨</div><div class="grow"><b>Kanal brendi</b><div class="muted small">Nom, username, tavsif, banner va logo</div></div><button class="btn sm" id="brandBtn">Ochish</button></div></div>
     <h2>Nashr qilish</h2>
@@ -315,13 +316,47 @@ async function settings() {
     try { await api('/api/settings', { method: 'PATCH', body: patch }); haptic('medium'); toast('Saqlandi'); } catch (e) { toast(e.message); }
   };
   if ($('#yton')) $('#yton').onclick = connectYouTube;
+  if ($('#ytsetup')) $('#ytsetup').onclick = async (e) => { e.preventDefault(); openYtSetup(await api('/api/youtube/setup')); };
   if ($('#brandBtn')) $('#brandBtn').onclick = openBrand;
   if ($('#reconn')) $('#reconn').onclick = (e) => { e.preventDefault(); connectYouTube(); };
   if ($('#ytoff')) $('#ytoff').onclick = async () => { if (confirm('Kanal uzilsinmi?')) { await api('/api/youtube/disconnect', { method: 'POST' }); settings(); } };
 }
 
 async function connectYouTube() {
+  const info = await api('/api/youtube/setup');
+  if (!info.hasCreds) return openYtSetup(info);
   try { const { url } = await api('/api/youtube/auth'); tg?.openLink ? tg.openLink(url) : (location.href = url); } catch (e) { toast(e.message); }
+}
+const ext = (url) => (tg?.openLink ? tg.openLink(url) : window.open(url, '_blank'));
+
+// one-time Google setup, all inside the web app: links open the right Google Cloud pages, the redirect URI is ready to copy
+function openYtSetup(info) {
+  const step = (n, title, body) => `<div class="card"><div class="row" style="align-items:flex-start"><span class="pill blue" style="min-width:26px;justify-content:center">${n}</span><div class="grow"><b>${title}</b><div class="small muted" style="margin-top:4px">${body}</div></div></div></div>`;
+  $('#sheetBody').innerHTML = `<div class="row" style="margin-bottom:6px"><b class="grow">📺 YouTube'ni sozlash</b><button class="icon" id="x">✕</button></div>
+    <p class="small muted">Bu <b>bir marta</b> qilinadi: ilovangiz Google'da ro'yxatdan o'tadi. Keyin kanal bitta tugma bilan ulanadi. ~10 daqiqa.</p>
+    ${step(1, 'YouTube API\'ni yoqing', `Kanal ulangan Google akkaunt bilan oching → loyiha yarating (nomi: Lahza) → <b>Enable</b>.<br><button class="btn sm" data-ext="https://console.cloud.google.com/apis/library/youtube.googleapis.com" style="margin-top:6px">Ochish ↗</button>`)}
+    ${step(2, 'Ruxsat oynasini sozlang', `App name: <b>Lahza</b>, emailingiz, Audience: <b>External</b> → Create. Keyin <b>Audience → Test users</b>ga emailingizni qo'shing.<br><button class="btn sm" data-ext="https://console.cloud.google.com/auth/overview" style="margin-top:6px">Ochish ↗</button>`)}
+    ${step(3, 'OAuth client yarating', `<b>Create client</b> → turi <b>Web application</b> → <b>Authorized redirect URIs</b>ga shuni qo'shing:
+      ${info.redirectUri ? `<div class="row" style="margin-top:6px"><code class="grow" style="background:var(--s2);padding:8px;border-radius:8px;font-size:12px;word-break:break-all">${esc(info.redirectUri)}</code><button class="btn sm" id="cpy">Nusxa</button></div>`
+        : '<div class="warnbox" style="margin-top:6px">Server manzili aniqlanmadi. Railway → Settings → Networking → <b>Generate Domain</b> bosing va qayta deploy qiling.</div>'}
+      <button class="btn sm" data-ext="https://console.cloud.google.com/auth/clients/create" style="margin-top:6px">Ochish ↗</button>`)}
+    ${step(4, 'Kalitlarni shu yerga qo\'ying', `Chiqqan oynadan nusxa oling:
+      <label class="f">Client ID</label><input type="text" id="cid" placeholder="....apps.googleusercontent.com" value="${esc(info.clientId)}" autocomplete="off">
+      <label class="f">Client secret</label><input type="password" id="csec" placeholder="GOCSPX-..." autocomplete="off">
+      <button class="btn primary" id="csave" style="width:100%;margin-top:10px">Saqlash va kanalni ulash</button>`)}
+    <p class="small muted">Google "This app isn't verified" desa: <b>Advanced → Go to Lahza</b>. Bu sizning ilovangiz. Ulanib bo'lgach, Google'da <b>Audience → Publish app</b> bosing, aks holda ulanish 7 kunda eskiradi.</p>`;
+  $('#sheet').classList.remove('hidden');
+  $('#x').onclick = closeSheet;
+  document.querySelectorAll('[data-ext]').forEach((b) => (b.onclick = () => ext(b.dataset.ext)));
+  if ($('#cpy')) $('#cpy').onclick = () => copy(info.redirectUri);
+  $('#csave').onclick = async (e) => {
+    e.target.disabled = true;
+    try {
+      await api('/api/youtube/setup', { method: 'POST', body: { clientId: $('#cid').value, clientSecret: $('#csec').value } });
+      haptic('medium'); toast('Saqlandi. Google oynasi ochilmoqda…'); closeSheet();
+      const { url } = await api('/api/youtube/auth'); tg?.openLink ? tg.openLink(url) : (location.href = url);
+    } catch (er) { toast(er.message); e.target.disabled = false; }
+  };
 }
 const copy = (t) => { navigator.clipboard?.writeText(t).then(() => toast('Nusxa olindi: ' + t.slice(0, 40)), () => toast(t)); haptic(); };
 

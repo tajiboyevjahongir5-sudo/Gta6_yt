@@ -193,8 +193,13 @@ async function api(req, res, url) {
       return send(res, 200, { ok: true, studio: `https://studio.youtube.com/channel/${id}/editing/profile` });
     } catch (e) { return send(res, 400, { error: e.message }); }
   }
+  if (p === '/api/youtube/setup' && m === 'GET') return send(res, 200, yt.setupInfo());
+  if (p === '/api/youtube/setup' && m === 'POST') {
+    try { yt.setCreds(b.clientId, b.clientSecret); log('Google OAuth client saqlandi'); return send(res, 200, yt.setupInfo()); }
+    catch (e) { return send(res, 400, { error: e.message }); }
+  }
   if (p === '/api/youtube/auth') {
-    if (!yt.configured()) return send(res, 400, { error: 'GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET va PUBLIC_URL sozlanmagan' });
+    if (!yt.configured()) return send(res, 400, { error: 'Avval Sozlamalar → YouTube\'ni sozlash bo\'limini to\'ldiring' });
     return send(res, 200, { url: yt.authUrl() });
   }
   if (p === '/api/youtube/disconnect' && m === 'POST') { yt.disconnect(); log('YouTube kanal uzildi'); return send(res, 200, { ok: true }); }

@@ -8,13 +8,28 @@ const { getSecret, setSecret, log } = require('./db');
 // youtube = manage the channel (banner, description, keywords); upload + readonly for videos and stats
 const SCOPES = ['https://www.googleapis.com/auth/youtube', 'https://www.googleapis.com/auth/youtube.upload', 'https://www.googleapis.com/auth/youtube.readonly'];
 const redirectUri = () => `${PUBLIC_URL}/oauth/google/callback`;
-const configured = () => !!(GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET && PUBLIC_URL);
+// the app's Google OAuth client: entered once in the web app (stored in the DB), or GOOGLE_CLIENT_ID/SECRET env vars
+function creds() {
+  const g = getSecret('google');
+  if (g?.id && g?.secret) return { id: g.id, secret: g.secret, source: 'app' };
+  if (GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET) return { id: GOOGLE_CLIENT_ID, secret: GOOGLE_CLIENT_SECRET, source: 'env' };
+  return null;
+}
+const configured = () => !!(creds() && PUBLIC_URL);
+function setCreds(id, secret) {
+  id = String(id || '').trim(); secret = String(secret || '').trim();
+  if (!/^[\w-]+\.apps\.googleusercontent\.com$/.test(id)) throw new Error('Client ID noto\'g\'ri: u "...apps.googleusercontent.com" bilan tugashi kerak');
+  if (secret.length < 10 || /\s/.test(secret)) throw new Error('Client secret noto\'g\'ri');
+  setSecret('google', { id, secret });
+}
+const setupInfo = () => ({ redirectUri: PUBLIC_URL ? redirectUri() : '', publicUrl: PUBLIC_URL, hasCreds: !!creds(), source: creds()?.source || null,
+  clientId: creds()?.id || '' });
 
 // state = expiry.signature, so only links we issued can finish the OAuth flow
 function authUrl() {
   const exp = Date.now() + 15 * 60 * 1000;
   const state = exp + '.' + crypto.createHmac('sha256', SECRET).update('oauth' + exp).digest('hex').slice(0, 32);
-  const q = new URLSearchParams({ client_id: GOOGLE_CLIENT_ID, redirect_uri: redirectUri(), response_type: 'code',
+  const q = new URLSearchParams({ client_id: creds().id, redirect_uri: redirectUri(), response_type: 'code',
     scope: SCOPES.join(' '), access_type: 'offline', prompt: 'consent', include_granted_scopes: 'true', state });
   return 'https://accounts.google.com/o/oauth2/v2/auth?' + q;
 }
@@ -26,7 +41,7 @@ function checkState(state) {
 async function tokenRequest(params) {
   const r = await fetch('https://oauth2.googleapis.com/token', { method: 'POST',
     headers: { 'content-type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({ client_id: GOOGLE_CLIENT_ID, client_secret: GOOGLE_CLIENT_SECRET, ...params }) });
+    body: new URLSearchParams({ client_id: creds().id, client_secret: creds().secret, ...params }) });
   const j = await r.json();
   if (!r.ok) throw new Error('Google token xatosi: ' + (j.error_description || j.error || r.status));
   return j;
@@ -136,4 +151,4 @@ async function applyBranding({ description, keywords, bannerFile }) {
   return ch.id;
 }
 
-module.exports = { canBrand, applyBranding, configured, connected, authUrl, checkState, finishAuth, disconnect, channelInfo, upload, setThumbnail, videoStats, fitTags };
+module.exports = { setCreds, setupInfo, canBrand, applyBranding, configured, connected, authUrl, checkState, finishAuth, disconnect, channelInfo, upload, setThumbnail, videoStats, fitTags };

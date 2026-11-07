@@ -75,16 +75,16 @@ Docker'siz: Node 22.13+, `ffmpeg`, `yt-dlp`, subtitr uchun `pip install faster-w
 |---|---|---|
 | `BOT_TOKEN` | ha | @BotFather → `/newbot` |
 | `ADMIN_IDS` | ha | Telegram ID'ingiz (botga yozing — u aytadi). Bir nechta bo'lsa vergul bilan |
-| `GOOGLE_CLIENT_ID` | ha | Google Cloud → Credentials → OAuth client (Web application) |
-| `GOOGLE_CLIENT_SECRET` | ha | o'sha joydan |
+| `GOOGLE_CLIENT_ID` | yo'q | Web App ichida kiritiladi (Sozlamalar → YouTube'ni sozlash). Xohlasangiz shu yerga ham yozish mumkin |
+| `GOOGLE_CLIENT_SECRET` | yo'q | o'sha joyda |
 | `ANTHROPIC_API_KEY` | tavsiya | console.anthropic.com → API Keys |
 | `SESSION_SECRET` | tavsiya | istalgan uzun tasodifiy matn (masalan 40+ belgi) |
 | `WEBAPP_PASSWORD` | ixtiyoriy | panelni oddiy brauzerda ochish uchun parol |
 | `DATA_DIR` | ixtiyoriy | volume mount path'dan avtomatik olinadi |
 | `PUBLIC_URL` | ixtiyoriy | Railway domenidan avtomatik; o'z domeningiz bo'lsa: `https://...` |
 
-5. Google Cloud → OAuth client → **Authorized redirect URIs** ga qo'shing: `https://<railway-domeningiz>/oauth/google/callback`.
-6. Deploydan keyin botga `/start` yozing → **Panel** → **Kanalni ulash**.
+5. Deploydan keyin botga `/start` yozing → **Panel** → **YouTube'ni sozlash va ulash**. Yo'riqnoma Google Cloud sahifalarini ochib beradi,
+   redirect URI'ni tayyor ko'rsatadi; Client ID / Secret'ni shu yerga qo'yasiz va kanal darhol ulanadi.
 
 > Resurslar: video montaj CPU va RAM talab qiladi. Railway'da xizmatga kamida 4 vCPU / 4–8 GB RAM bering (Hobby yoki Pro reja),
 > narx foydalanishga qarab. Birinchi build Whisper modelini yuklagani uchun 5–10 daqiqa davom etadi.
@@ -98,7 +98,7 @@ Docker'siz: Node 22.13+, `ffmpeg`, `yt-dlp`, subtitr uchun `pip install faster-w
 1. [Google Cloud Console](https://console.cloud.google.com/) → yangi loyiha → **YouTube Data API v3** ni yoqing.
 2. **OAuth consent screen**: External, o'z emailingizni *Test users* ga qo'shing.
 3. **Credentials → OAuth client ID → Web application**, redirect URI: `https://SIZNING-DOMEN/oauth/google/callback`.
-4. Client ID / Secret ni `.env` ga yozing, Panel → **Kanalni ulash**. Ruxsatlar: video yuklash, statistika va kanalni boshqarish (banner/tavsif uchun).
+4. Client ID / Secret ni Panel → ⚙️ → **YouTube'ni sozlash** oynasiga qo'ying (yoki `.env` ga yozing), so'ng **Kanalni ulash**. Ruxsatlar: video yuklash, statistika va kanalni boshqarish (banner/tavsif uchun).
    Avval ulangan bo'lsangiz, brendni o'rnatish uchun bir marta qayta ulang.
 5. Kanalni telefon orqali tasdiqlang (youtube.com/verify) — aks holda maxsus prevyu va 15 daqiqadan uzun video yuklab bo'lmaydi.
 
