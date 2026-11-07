@@ -12,7 +12,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends python3-pip && 
  && pip3 install --no-cache-dir --break-system-packages faster-whisper \
  && python3 -c "from faster_whisper import WhisperModel; WhisperModel('${WHISPER_MODEL}', device='cpu', compute_type='int8')"
 COPY . .
-ENV DATA_DIR=/data NODE_ENV=production
-VOLUME /data
+ENV NODE_ENV=production
 EXPOSE 3000
 CMD ["npm", "start"]

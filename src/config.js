@@ -10,7 +10,8 @@ if (fs.existsSync(envFile)) {
   }
 }
 const env = process.env;
-const DATA_DIR = path.resolve(env.DATA_DIR || path.join(__dirname, '..', 'data'));
+// Railway: a volume's mount path is given in RAILWAY_VOLUME_MOUNT_PATH; without a volume files are lost on every deploy
+const DATA_DIR = path.resolve(env.DATA_DIR || env.RAILWAY_VOLUME_MOUNT_PATH || path.join(__dirname, '..', 'data'));
 
 function findFont() {
   if (env.FONT_PATH && fs.existsSync(env.FONT_PATH)) return env.FONT_PATH;
@@ -21,7 +22,8 @@ function findFont() {
 
 module.exports = {
   PORT: Number(env.PORT || 3000),
-  PUBLIC_URL: String(env.PUBLIC_URL || '').replace(/\/+$/, ''),
+  // Railway gives the generated domain in RAILWAY_PUBLIC_DOMAIN (without https://)
+  PUBLIC_URL: String(env.PUBLIC_URL || (env.RAILWAY_PUBLIC_DOMAIN ? 'https://' + env.RAILWAY_PUBLIC_DOMAIN : '')).replace(/\/+$/, ''),
   DATA_DIR,
   WORK_DIR: path.join(DATA_DIR, 'work'),
   OUT_DIR: path.join(DATA_DIR, 'out'),

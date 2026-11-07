@@ -65,6 +65,30 @@ docker compose up -d --build
 HTTPS kerak (Telegram Web App va Google buni talab qiladi): domen + Caddy/Nginx yoki Cloudflare Tunnel.
 Docker'siz: Node 22.13+, `ffmpeg`, `yt-dlp`, subtitr uchun `pip install faster-whisper` o'rnating, keyin `npm install && npm start`.
 
+### Railway'ga joylash
+1. Railway → **New Project → Deploy from GitHub repo** → `Gta6_yt`. `Dockerfile` va `railway.json` avtomatik topiladi.
+2. Servis → **Settings → Networking → Generate Domain** (HTTPS domen; `PUBLIC_URL` undan avtomatik olinadi).
+3. Servis → **Volume** qo'shing, mount path: `/data` (baza, kliplar, brend shu yerda saqlanadi — volumesiz har deployda o'chadi).
+4. **Variables** bo'limiga quyidagilarni kiriting (`PORT` ni Railway o'zi beradi):
+
+| O'zgaruvchi | Majburiymi | Qayerdan olinadi |
+|---|---|---|
+| `BOT_TOKEN` | ha | @BotFather → `/newbot` |
+| `ADMIN_IDS` | ha | Telegram ID'ingiz (botga yozing — u aytadi). Bir nechta bo'lsa vergul bilan |
+| `GOOGLE_CLIENT_ID` | ha | Google Cloud → Credentials → OAuth client (Web application) |
+| `GOOGLE_CLIENT_SECRET` | ha | o'sha joydan |
+| `ANTHROPIC_API_KEY` | tavsiya | console.anthropic.com → API Keys |
+| `SESSION_SECRET` | tavsiya | istalgan uzun tasodifiy matn (masalan 40+ belgi) |
+| `WEBAPP_PASSWORD` | ixtiyoriy | panelni oddiy brauzerda ochish uchun parol |
+| `DATA_DIR` | ixtiyoriy | volume mount path'dan avtomatik olinadi |
+| `PUBLIC_URL` | ixtiyoriy | Railway domenidan avtomatik; o'z domeningiz bo'lsa: `https://...` |
+
+5. Google Cloud → OAuth client → **Authorized redirect URIs** ga qo'shing: `https://<railway-domeningiz>/oauth/google/callback`.
+6. Deploydan keyin botga `/start` yozing → **Panel** → **Kanalni ulash**.
+
+> Resurslar: video montaj CPU va RAM talab qiladi. Railway'da xizmatga kamida 4 vCPU / 4–8 GB RAM bering (Hobby yoki Pro reja),
+> narx foydalanishga qarab. Birinchi build Whisper modelini yuklagani uchun 5–10 daqiqa davom etadi.
+
 ### 2. Telegram bot
 1. @BotFather → `/newbot` → tokenni `BOT_TOKEN` ga yozing.
 2. O'z ID'ingizni `ADMIN_IDS` ga yozing (bilmasangiz botga yozing — u ID'ingizni aytadi).
