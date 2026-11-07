@@ -217,16 +217,23 @@ const server = http.createServer(async (req, res) => {
         if (!yt.checkState(url.searchParams.get('state'))) throw new Error('Havola eskirgan, qaytadan urinib ko\'ring');
         if (url.searchParams.get('error')) throw new Error(url.searchParams.get('error'));
         const ch = await yt.finishAuth(url.searchParams.get('code'));
-        msg = `✅ Kanal ulandi: ${ch?.title || ''}`;
+        msg = `✅ Kanal ulandi: <b>${tg.escHtml(ch?.title || '')}</b>`;
         tg.notifyAdmins(`✅ YouTube kanal ulandi: <b>${tg.escHtml(ch?.title || '')}</b>`);
         // first connection: prepare the channel brand kit right away and send it to the bot
         if (!brand.get()) brand.generate().then(async (k) => {
           await tg.sendPhotoToAdmins(brand.files().banner, `🎨 Kanal brendi tayyor\n\n<b>Nom variantlari:</b> ${k.names.map(tg.escHtml).join(' · ')}\n<b>Username:</b> ${k.handles.map((h) => '@' + h).join(' · ')}\n\nPanel → ⚙️ → Kanal brendi: tahrirlash va kanalga o'rnatish`);
           await tg.sendPhotoToAdmins(brand.files().logo, 'Logo (800×800)');
         }).catch((e) => log('Brend yaratilmadi: ' + e.message, 'warn'));
-      } catch (e) { msg = '❌ ' + e.message; }
+      } catch (e) {
+        // the most common first-time error: the API isn't enabled in the Google Cloud project
+        const proj = (e.message.match(/project[= ](\d+)/) || [])[1];
+        if (/has not been used|is disabled|accessNotConfigured/i.test(e.message)) {
+          msg = `❌ Google Cloud loyihangizda <b>YouTube Data API v3</b> yoqilmagan.<br><br>` +
+            `<a href="https://console.cloud.google.com/apis/library/youtube.googleapis.com${proj ? '?project=' + proj : ''}" style="color:#8fbcf2">Shu yerda <b>Enable</b> bosing</a>, 3–5 daqiqa kuting va panelda qayta <b>Kanalni ulash</b> bosing.`;
+        } else msg = '❌ ' + tg.escHtml(e.message);
+      }
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
-      return res.end(`<!doctype html><meta name=viewport content="width=device-width"><body style="font:18px system-ui;background:#0d0f14;color:#fff;display:grid;place-items:center;height:90vh;text-align:center"><div>${msg.replace(/</g, '&lt;')}<p style="opacity:.6">Bu oynani yopib, Telegramga qayting.</p></div>`);
+      return res.end(`<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><body style="margin:0;font:17px/1.5 system-ui;background:#0d0f14;color:#fff;min-height:90vh;display:flex;align-items:center;justify-content:center;padding:24px;box-sizing:border-box;text-align:center;overflow-wrap:anywhere"><div style="max-width:520px">${msg}<p style="opacity:.6">Bu oynani yopib, Telegramga qayting.</p></div>`);
     }
     let mm;
     if ((mm = url.pathname.match(/^\/media\/clip\/(\d+)\/(video|thumb)$/))) {
