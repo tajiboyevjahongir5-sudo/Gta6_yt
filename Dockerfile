@@ -1,19 +1,24 @@
 FROM node:22-bookworm-slim
-# ffmpeg = montaj, yt-dlp = stream yuklab olish, fonts = prevyu yozuvlari, pil + noto emoji = animatsion emojilar
-RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg python3 python3-pil ca-certificates curl fonts-dejavu-core fonts-noto-color-emoji \
- && curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp \
- && chmod +x /usr/local/bin/yt-dlp && rm -rf /var/lib/apt/lists/*
+# ffmpeg = montaj, fonts = prevyu yozuvlari, pil + noto emoji = animatsion emojilar, git = PO token server
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg python3 python3-pip python3-pil ca-certificates curl unzip git \
+    fonts-dejavu-core fonts-noto-color-emoji && rm -rf /var/lib/apt/lists/*
+# yt-dlp (pip, so plugins load) + bgutil PO token plugin: helps get past YouTube's "confirm you're not a bot" on server IPs
+RUN pip3 install --no-cache-dir --break-system-packages -U "yt-dlp[default]" bgutil-ytdlp-pot-provider && yt-dlp --version
 # yt-dlp needs a JavaScript runtime (Deno) for full YouTube support
-RUN apt-get update && apt-get install -y --no-install-recommends unzip && rm -rf /var/lib/apt/lists/* \
- && curl -fsSL https://github.com/denoland/deno/releases/latest/download/deno-x86_64-unknown-linux-gnu.zip -o /tmp/deno.zip \
+RUN curl -fsSL https://github.com/denoland/deno/releases/latest/download/deno-x86_64-unknown-linux-gnu.zip -o /tmp/deno.zip \
  && unzip -q /tmp/deno.zip -d /usr/local/bin && rm /tmp/deno.zip && deno --version
+# bgutil PO token HTTP server, same version as the plugin (https://github.com/Brainicism/bgutil-ytdlp-pot-provider).
+# Optional: if it fails to build, the app still works without it.
+RUN V=$(pip3 show bgutil-ytdlp-pot-provider | awk '/^Version/{print $2}') \
+ && git clone --depth 1 --single-branch --branch "$V" https://github.com/Brainicism/bgutil-ytdlp-pot-provider.git /opt/bgutil \
+ && cd /opt/bgutil/server && npm ci --no-audit --no-fund && npx tsc && test -f build/main.js \
+ || (echo "PO token server build skipped" && rm -rf /opt/bgutil)
 WORKDIR /app
 COPY package*.json ./
 RUN npm install --omit=dev --no-audit --no-fund
 # Shorts subtitles: faster-whisper, model downloaded once at build time (WHISPER_MODEL must match the setting)
 ARG WHISPER_MODEL=small
-RUN apt-get update && apt-get install -y --no-install-recommends python3-pip && rm -rf /var/lib/apt/lists/* \
- && pip3 install --no-cache-dir --break-system-packages faster-whisper \
+RUN pip3 install --no-cache-dir --break-system-packages faster-whisper \
  && python3 -c "from faster_whisper import WhisperModel; WhisperModel('${WHISPER_MODEL}', device='cpu', compute_type='int8')"
 COPY . .
 ENV NODE_ENV=production

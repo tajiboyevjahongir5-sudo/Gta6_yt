@@ -353,6 +353,20 @@ const botHandlers = {
   },
 };
 
+// bgutil PO token server for yt-dlp: runs next to the app on 127.0.0.1:4416 (the plugin's default), restarted if it dies
+function startPotServer() {
+  const main = process.env.BGUTIL_MAIN || '/opt/bgutil/server/build/main.js';
+  if (!fs.existsSync(main)) return;
+  const { spawn } = require('child_process');
+  let fails = 0;
+  const launch = () => {
+    const p = spawn(process.execPath, [main], { cwd: path.dirname(path.dirname(main)), stdio: 'ignore' });
+    p.on('exit', () => { if (++fails > 20) return log('PO token server to\'xtadi', 'warn'); setTimeout(launch, 5000 * Math.min(fails, 6)); });
+  };
+  launch();
+  log('YouTube PO token server ishga tushdi (bot tekshiruvini o\'tishga yordam beradi)');
+}
+
 async function checkTools() {
   for (const [name, bin, arg] of [['ffmpeg', cfg.FFMPEG, '-version'], ['yt-dlp', cfg.YTDLP, '--version']]) {
     try { await run(bin, [arg], { timeoutMs: 10000 }); } catch (e) { log(`${name} topilmadi — o'rnating (README ga qarang)`, 'error'); }
@@ -366,6 +380,7 @@ if (require.main === module) {
   server.listen(cfg.PORT, () => {
     log(`Lahza ishga tushdi: http://localhost:${cfg.PORT}`);
     checkTools();
+    startPotServer();
     pipeline.start();
     tg.startPolling(botHandlers);
   });

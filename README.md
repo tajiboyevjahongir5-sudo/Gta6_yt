@@ -156,6 +156,9 @@ Ma'lumotlar `DATA_DIR` da: `lahza.db`, `work/` (vaqtinchalik), `out/` (tayyor kl
 - Prevyu A/B test (YouTube "Test & Compare")
 
 ## YouTube serverni bloklasa
+Avtomatik: Docker image'da **bgutil PO token** plagini bor (yt-dlp'ga "haqiqiy brauzer" tokenini beradi) — ko'p hollarda blokni o'tadi,
+lekin ma'lumot markazi IP'larida kafolat emas. Loglarda "YouTube PO token server ishga tushdi" yozuvi chiqadi.
+
 Cookies'siz yo'llar:
 - **📁 Video faylini yuklash** (Asosiy sahifa): videoni telefondan/kompyuterdan to'g'ridan-to'g'ri yuklaysiz — YouTube ishtirok etmaydi.
 - **Twitch / Kick** havolalari — odatda bloklanmaydi.
