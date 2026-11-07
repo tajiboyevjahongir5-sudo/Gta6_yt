@@ -64,8 +64,9 @@ const KEYWORDS = [
 function emojiForText(text) { for (const [re, e] of KEYWORDS) if (re.test(text)) return e; return null; }
 
 // plan the effects of one clip. peakT = loudest moment (seconds into the clip)
-function planEvents({ dur, peakT, peakEmoji, words = [], area, maxExtra = 2, intro = true, emojis = true }) {
+function planEvents({ dur, peakT, peakEmoji, words = [], area, maxExtra = 2, intro = true, emojis = true, endDing = false }) {
   const ev = [];
+  if (endDing && dur >= 8) ev.push({ t: dur - 1.5, sfx: 'ding', vol: 0.4 });
   if (intro) ev.push({ t: 0, sfx: 'whoosh', vol: 0.35 });
   const pt = Math.max(0.3, Math.min(dur - 1.5, peakT));
   ev.push({ t: pt - 0.05, sfx: 'boom', vol: 0.55 });

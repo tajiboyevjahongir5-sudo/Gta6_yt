@@ -358,6 +358,8 @@ async function settings() {
       <div class="row"><div class="grow">${inp('clipBefore', 'Lahzadan oldin (s)', 'number')}</div><div class="grow">${inp('clipAfter', 'Lahzadan keyin (s)', 'number')}</div></div>
       ${sw('facecamLayout', 'Webkamera tepada (Shorts)', 'Videoda streamer kamerasi bo\'lsa: tepada kamera, pastda o\'yin. Kamera bo\'lmasa oddiy ko\'rinish')}
       ${sw('effects', 'Ovoz effektlari', 'Whoosh, boom — eng qiziq joylarda')}
+      ${sw('zoom', 'Zoom eng qiziq joyda', 'Kadr keskin yaqinlashadi va silliq qaytadi')}
+      ${sw('outro', 'Chiroyli yakun', 'Videoga 6 s outro (logo, rahmat, obuna), Shorts oxirida obuna tugmasi')}
       ${sw('emojis', 'Animatsion emojilar', 'Video ustida sakraydigan emojilar')}
       ${sw('subtitles', 'Shorts subtitrlari', 'So\'zma-so\'z, pastda, layk/koment tugmalari va tavsifdan chetda')}
       <div class="row"><div class="grow"><label class="f">Subtitr uslubi</label><select data-k="subtitleStyle">${[['pop', "Pop (so'zlar ovozga mos chiqadi)"], ['clean', 'Toza (kursiv, oq)'], ['karaoke', "Karaoke (sariq so'z)"]].map(([v, t]) => `<option value="${v}" ${s.subtitleStyle === v ? 'selected' : ''}>${t}</option>`).join('')}</select></div></div>

@@ -242,12 +242,18 @@ async function processJob(job) {
     facecam = await subs.detectFacecam(src);
     if (facecam) log(`#${job.id}: webkamera topildi (${facecam.w}×${facecam.h}, ${facecam.hits}/${facecam.samples} kadrda) — Shorts tepada kamera, pastda o'yin`);
   }
+  // end card: the connected channel's name (or the brand / settings name) and its logo if a brand kit exists
+  let channelName = settings.channelName;
+  try { const ch = yt.connected() ? await yt.channelInfo() : null; if (ch?.title) channelName = ch.title; } catch (e) {}
+  const brandLogo = path.join(require('./config').DATA_DIR, 'brand', 'logo.png');
+  const outro = settings.outro ? { channel: channelName, topic: video.subject, language: settings.language, accent: settings.accent,
+    logo: fs.existsSync(brandLogo) ? brandLogo : null } : null;
   setJob(job.id, { status: 'rendering', step: 'Montaj qilinmoqda', progress: 0 });
   const totalSteps = (settings.makeLong ? 1 : 0) + (settings.makeShorts ? Math.min(settings.shortsPerVideo, picked.length) : 0) || 1;
   let done = 0;
   if (settings.makeLong && picked.length >= 3) {
     const out = path.join(outDir, 'compilation.mp4');
-    await render.renderCompilation(src, picked, out, dir, (p) => setJob(job.id, { progress: (done + p) / totalSteps }), { effects: settings.effects, emojis: settings.emojis });
+    await render.renderCompilation(src, picked, out, dir, (p) => setJob(job.id, { progress: (done + p) / totalSteps }), { effects: settings.effects, emojis: settings.emojis, zoom: settings.zoom, outro });
     const ordered = [...picked].sort((a, b) => a.start - b.start);
     let t = 0; const chapters = ordered.map((s, i) => { const line = `${fmtTime(t)} ${s.caption || (settings.language === 'uz' ? 'Lahza #' : 'Moment #') + (i + 1)}`; t += s.end - s.start; return line; });
     const description = [long.description, hashtags.length ? '\n' + hashtags.join(' ') : '', settings.language === 'uz' ? '⏱ Taym-kodlar:' : settings.language === 'ru' ? '⏱ Таймкоды:' : '⏱ Chapters:', ...chapters, '', creditLine(job), '', settings.descriptionFooter].filter((x) => x !== undefined).join('\n');
@@ -262,7 +268,8 @@ async function processJob(job) {
       const s = picked[i]; const title = s.shortTitle || tpl.shortTitle(i);
       const out = path.join(outDir, `short_${i + 1}.mp4`); const thumb = path.join(outDir, `short_${i + 1}.jpg`);
       const words = settings.subtitles ? await subs.transcribe(src, s.start, Math.min(58, s.end - s.start), dir, { model: settings.whisperModel, lang: settings.subtitleLang, to: settings.language === 'en' ? 'en' : '' }) : [];
-      await render.renderShort(src, s, out, dir, { words, accent: settings.accent, style: settings.subtitleStyle, emoji: s.emoji, effects: settings.effects, emojis: settings.emojis, facecam });
+      await render.renderShort(src, s, out, dir, { words, accent: settings.accent, style: settings.subtitleStyle, emoji: s.emoji, effects: settings.effects, emojis: settings.emojis, facecam,
+        zoom: settings.zoom, endCard: settings.outro ? { channel: channelName, language: settings.language } : null });
       await render.grabFrame(out, 1.5, thumb, 540);
       const description = [title, '', creditLine(job), '', ['#shorts', ...hashtags].join(' ')].join('\n');
       const r = ins.run(job.id, 'short', out, thumb, JSON.stringify([s]), Math.min(58, s.end - s.start), s.final,

@@ -62,6 +62,8 @@ const DEFAULTS = {
   subtitleStyle: 'pop',        // pop (words appear as spoken, bouncy) | clean (italic white phrase) | karaoke (bold caps, spoken word yellow)
   effects: true,               // sound effects (whoosh, boom, pop)
   emojis: false,               // animated emoji reactions on top of the video
+  zoom: true,                  // punch-in zoom on the key moment
+  outro: true,                 // end card: 6 s outro on compilations, subscribe pop-up at the end of Shorts
   facecamLayout: true,         // streamer webcam detected -> Shorts with the webcam on top, gameplay below
 };
 function getSettings() {
