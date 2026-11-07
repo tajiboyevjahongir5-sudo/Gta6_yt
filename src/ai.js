@@ -121,7 +121,7 @@ const SCHEMA = {
         index: { type: 'integer' },
         score: { type: 'integer', description: '0-10: how interesting this moment is for a viewer of this kind of video' },
         caption: { type: 'string', description: '2-5 word caption of what happens in this moment' },
-        short_title: { type: 'string', description: 'Shorts title for this moment, max 70 chars, without #shorts' },
+        short_title: { type: 'string', description: 'Shorts title for this moment: max 50 chars, punchy, makes people want to see what happens; no #shorts, no emojis spam' },
         emoji: { type: 'string', enum: EMOJIS, description: 'reaction emoji that pops up on the key moment' },
       } } },
     long: { type: 'object', additionalProperties: false, required: ['title', 'description', 'tags', 'thumb_text'],

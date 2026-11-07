@@ -39,6 +39,21 @@ async function runYt(args, opts) {
     throw e;
   } finally { keepRotatedCookies(); }
 }
+// downloaded/uploaded source videos are kept a few days so "Qayta tayyorlash" (re-render) is instant
+const SOURCES_DIR = path.join(DATA_DIR, 'sources');
+const SOURCE_DAYS = 3;
+function keptSource(jobId) {
+  const f = path.join(SOURCES_DIR, `${jobId}.mp4`), j = path.join(SOURCES_DIR, `${jobId}.json`);
+  return fs.existsSync(f) && fs.existsSync(j) ? { file: f, info: JSON.parse(fs.readFileSync(j, 'utf8')) } : null;
+}
+function removeKeptSource(jobId) { for (const e of ['mp4', 'json']) fs.rmSync(path.join(SOURCES_DIR, `${jobId}.${e}`), { force: true }); }
+function cleanOldSources() {
+  if (!fs.existsSync(SOURCES_DIR)) return;
+  for (const f of fs.readdirSync(SOURCES_DIR)) {
+    const p = path.join(SOURCES_DIR, f);
+    if (Date.now() - fs.statSync(p).mtimeMs > SOURCE_DAYS * 86400000) fs.rmSync(p, { force: true });
+  }
+}
 // videos uploaded straight from the phone/computer (no YouTube download at all)
 const UPLOAD_DIR = path.join(DATA_DIR, 'uploads');
 function saveCookies(text) {
@@ -91,6 +106,18 @@ function addJob(url, sourceId = null, meta = {}) {
   return { id: Number(r.lastInsertRowid) };
 }
 const lastProgress = new Map();
+function redoJob(id) {
+  const job = db.prepare('SELECT * FROM jobs WHERE id = ?').get(id);
+  if (!job) throw new Error('Topilmadi');
+  if (['downloading', 'analyzing', 'rendering'].includes(job.status)) throw new Error('Hozir ishlanmoqda');
+  for (const c of db.prepare("SELECT * FROM clips WHERE job_id = ? AND status NOT IN ('published','uploading')").all(id))
+    for (const f of [c.file, c.thumb]) if (f) fs.rmSync(f, { force: true });
+  db.prepare("DELETE FROM clips WHERE job_id = ? AND status NOT IN ('published','uploading')").run(id);
+  if (job.url.startsWith('upload:') && !keptSource(id)) throw new Error('Yuklangan faylning nusxasi saqlanmagan (3 kundan eski) — videoni qaytadan yuklang');
+  updateRow('jobs', id, { status: 'queued', error: null, progress: 0, step: 'Qayta tayyorlash', updated_at: Date.now() });
+  log(`#${id} qayta tayyorlanmoqda`);
+  kick();
+}
 const setJob = (id, patch) => {
   // progress-only updates arrive many times a second from ffmpeg/yt-dlp: write at most ~1/s or per 1%
   if (Object.keys(patch).length === 1 && 'progress' in patch) {
@@ -114,6 +141,12 @@ async function ytdlp(args, opts, state) {
 }
 
 async function download(job, dir, quality, allowLow = false) {
+  const kept = keptSource(job.id);
+  if (kept) {
+    const dest = path.join(dir, 'source.mp4'); fs.renameSync(kept.file, dest);
+    log(`#${job.id}: saqlangan manba ishlatildi (qayta yuklab olinmadi)`);
+    return { file: dest, meta: kept.info.meta, transcript: kept.info.transcript || '' };
+  }
   if (job.url.startsWith('upload:')) {
     const f = path.join(UPLOAD_DIR, path.basename(job.url.slice(7)));
     if (!fs.existsSync(f)) throw new Error('Yuklangan fayl topilmadi, qaytadan yuklang');
@@ -290,9 +323,16 @@ async function processJob(job) {
   }
   if (settings.makeShorts) {
     for (let i = 0; i < Math.min(settings.shortsPerVideo, picked.length); i++) {
-      const s = picked[i]; const title = s.shortTitle || tpl.shortTitle(i);
+      const m = picked[i]; const title = m.shortTitle || tpl.shortTitle(i);
       const out = path.join(outDir, `short_${i + 1}.mp4`); const thumb = path.join(outDir, `short_${i + 1}.jpg`);
-      const words = settings.subtitles ? await subs.transcribe(src, s.start, Math.min(58, s.end - s.start), dir, { model: settings.asrModel, lang: settings.subtitleLang, to: settings.language, context: { title: meta.title || job.title, subject: video.subject } }) : [];
+      // listen to a wider stretch around the moment, then pick hook start + clean end from the speech
+      const peak = m.peak ?? (m.start + m.end) / 2;
+      const w0 = Math.max(0, peak - 8), wDur = Math.min(info.duration - w0, 30);
+      const wide = settings.subtitles ? await subs.transcribe(src, w0, wDur, dir, { model: settings.asrModel, lang: settings.subtitleLang, to: settings.language, context: { title: meta.title || job.title, subject: video.subject } }) : [];
+      const abs = wide.map((w) => ({ ...w, start: w.start + w0, end: w.end + w0 }));
+      const win = info.duration <= 75 ? { start: m.start, end: m.end, peak } : shortWindow({ ...m, peak }, abs, info.duration);
+      const s = { ...m, ...win };
+      const words = abs.filter((w) => w.end > s.start && w.start < s.end).map((w) => ({ ...w, start: +(w.start - s.start).toFixed(2), end: +(w.end - s.start).toFixed(2) }));
       await render.renderShort(src, s, out, dir, { words, accent: settings.accent, style: settings.subtitleStyle, emoji: s.emoji, effects: settings.effects, emojis: settings.emojis, facecam,
         zoom: settings.zoom, endCard: settings.outro ? card : null });
       await render.grabFrame(out, 1.5, thumb, 540);
@@ -303,11 +343,49 @@ async function processJob(job) {
       setJob(job.id, { progress: done / totalSteps });
     }
   }
-  if (!settings.keepSource) fs.rmSync(dir, { recursive: true, force: true });
+  // keep the source for a few days for re-renders, drop the rest of the work dir
+  try {
+    fs.mkdirSync(SOURCES_DIR, { recursive: true });
+    fs.renameSync(src, path.join(SOURCES_DIR, `${job.id}.mp4`));
+    fs.writeFileSync(path.join(SOURCES_DIR, `${job.id}.json`), JSON.stringify({ meta, transcript }));
+  } catch (e) { log('Manba saqlanmadi: ' + e.message, 'warn'); }
+  fs.rmSync(dir, { recursive: true, force: true });
   setJob(job.id, { status: 'done', step: `${created.length} ta klip tayyor`, progress: 1 });
   log(`#${job.id} tayyor: ${created.length} ta klip (${job.title || job.url})`);
   if (settings.autoPublish) for (const id of created) scheduleClip(id);
   for (const id of created) await announceClip(id);
+}
+
+// Shorts window: start ~4 s before the peak (hook), cut points moved to pauses between sentences so nobody is cut
+// mid-word, end after the sentence that follows the peak. words = absolute times (seconds in the source).
+function shortWindow(seg, words, duration, { before = 4, after = 10, min = 12, max = 45 } = {}) {
+  const peak = seg.peak ?? (seg.start + seg.end) / 2;
+  let start = Math.max(0, peak - before), end = Math.min(duration, peak + after);
+  if (words.length) {
+    // start: the beginning of a phrase (a word after a >=0.35 s pause) closest to the planned start, within -2.5..+1 s
+    let best = null;
+    words.forEach((w, i) => {
+      const gapBefore = i === 0 ? 9 : w.start - words[i - 1].end;
+      if (gapBefore >= 0.35 && w.start >= start - 2.5 && w.start <= Math.min(start + 1, peak - 0.5)) {
+        if (!best || Math.abs(w.start - start) < Math.abs(best - start)) best = w.start;
+      }
+    });
+    if (best !== null) start = Math.max(0, best - 0.2);
+    else { const inside = words.find((w) => w.start < start && w.end > start); if (inside) start = Math.max(0, inside.start - 0.2); }
+    // end: the first sentence end / pause after the planned end (within +6 s), never mid-word
+    const after_ = words.filter((w) => w.end >= end - 1);
+    let cut = null;
+    for (let i = 0; i < after_.length; i++) {
+      const w = after_[i], next = after_[i + 1];
+      if (/[.!?…]$/.test(w.word) || !next || next.start - w.end >= 0.5) { cut = w.end + 0.35; break; }
+      if (w.end > end + 6) break;
+    }
+    if (cut !== null) end = cut;
+    else { const inside = words.find((w) => w.start < end && w.end > end); if (inside) end = inside.end + 0.25; }
+  }
+  if (end - start < min) end = Math.min(duration, start + min);
+  if (end - start > max) end = start + max;
+  return { start: +start.toFixed(2), end: +Math.min(duration, end).toFixed(2), peak };
 }
 
 async function announceClip(id) {
@@ -506,6 +584,7 @@ function start() {
   every(20 * 60000, checkSources);
   every(3 * 3600000, refreshStats);
   every(10 * 60000, () => refreshChannel(5 * 60000));
+  every(3600000, async () => cleanOldSources());
 }
 
-module.exports = { refreshChannel, channelRefreshState, COOKIES, UPLOAD_DIR, saveCookies, start, addJob, addSource, checkSources, scheduleClip, refreshStats, announceClip, chooseMoments, normalizeSourceUrl, kick };
+module.exports = { redoJob, removeKeptSource, refreshChannel, channelRefreshState, COOKIES, UPLOAD_DIR, saveCookies, start, addJob, addSource, checkSources, scheduleClip, refreshStats, announceClip, chooseMoments, normalizeSourceUrl, kick };

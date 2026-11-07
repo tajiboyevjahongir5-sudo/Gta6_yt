@@ -158,6 +158,9 @@ async function api(req, res, url) {
   if (p === '/api/overview') return send(res, 200, await overview());
   if (p === '/api/jobs' && m === 'GET') return send(res, 200, db.prepare('SELECT * FROM jobs ORDER BY id DESC LIMIT 100').all().map(jobView));
   if (p === '/api/jobs' && m === 'POST') { try { return send(res, 200, pipeline.addJob(b.url)); } catch (e) { return send(res, 400, { error: e.message }); } }
+  if ((mm = p.match(/^\/api\/jobs\/(\d+)\/redo$/)) && m === 'POST') {
+    try { pipeline.redoJob(+mm[1]); return send(res, 200, { ok: true }); } catch (e) { return send(res, 400, { error: e.message }); }
+  }
   if ((mm = p.match(/^\/api\/jobs\/(\d+)\/retry$/)) && m === 'POST') { updateRow('jobs', +mm[1], { status: 'queued', error: null, progress: 0 }); pipeline.kick(); return send(res, 200, { ok: true }); }
   if ((mm = p.match(/^\/api\/jobs\/(\d+)$/)) && m === 'DELETE') {
     const j = db.prepare('SELECT status FROM jobs WHERE id = ?').get(+mm[1]);
@@ -165,6 +168,7 @@ async function api(req, res, url) {
     for (const c of db.prepare("SELECT * FROM clips WHERE job_id = ? AND status != 'published'").all(+mm[1])) for (const f of [c.file, c.thumb]) if (f) fs.rmSync(f, { force: true });
     db.prepare("DELETE FROM clips WHERE job_id = ? AND status != 'published'").run(+mm[1]);
     db.prepare('DELETE FROM jobs WHERE id = ?').run(+mm[1]);
+    pipeline.removeKeptSource(+mm[1]);
     return send(res, 200, { ok: true });
   }
 

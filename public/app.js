@@ -135,7 +135,7 @@ const jobCard = (j) => `<div class="card"><div class="row"><div class="grow elli
   <div class="muted small">${esc(j.author || '')}${j.duration ? ' • ' + dur(j.duration) : ''}${j.step ? ' • ' + esc(j.step) : ''}</div>
   ${['downloading', 'analyzing', 'rendering'].includes(j.status) ? `<div class="bar"><i style="width:${Math.round((j.progress || 0) * 100)}%"></i></div>` : ''}
   ${j.error ? `<div class="small" style="color:#ff8b8e;margin-top:6px">${esc(j.error)}</div>` : ''}
-  ${j.status === 'failed' || j.status === 'done' ? `<div class="row" style="margin-top:8px">${j.status === 'failed' ? `<button class="btn sm" data-retry="${j.id}">Qayta urinish</button>` : `<button class="btn sm" data-go="clips">${j.clips} ta klip ›</button>`}<button class="btn sm danger" data-del="${j.id}">O'chirish</button></div>` : ''}</div>`;
+  ${j.status === 'failed' || j.status === 'done' ? `<div class="row" style="margin-top:8px">${j.status === 'failed' ? `<button class="btn sm" data-retry="${j.id}">Qayta urinish</button>` : `<button class="btn sm" data-go="clips">${j.clips} ta klip ›</button><button class="btn sm" data-redo="${j.id}">🔁 Qayta tayyorlash</button>`}<button class="btn sm danger" data-del="${j.id}">O'chirish</button></div>` : ''}</div>`;
 
 async function jobs() {
   const list = await api('/api/jobs');
@@ -145,6 +145,9 @@ async function jobs() {
     ${list.length ? list.map(jobCard).join('') : '<div class="empty">Hali video yo\'q. Havola qo\'shing yoki Manbalar bo\'limida kanal kuzating.</div>'}`;
   $('#add').onclick = async () => { await addUrl(); jobs(); };
   document.querySelectorAll('[data-retry]').forEach((b) => (b.onclick = async () => { await api(`/api/jobs/${b.dataset.retry}/retry`, { method: 'POST' }); jobs(); }));
+  document.querySelectorAll('[data-redo]').forEach((b) => (b.onclick = async () => {
+    if (!confirm('Kliplar joriy sozlamalar bilan qaytadan montaj qilinsinmi? (YouTube\'ga yuklanmaganlari o\'chiriladi)')) return;
+    try { await api(`/api/jobs/${b.dataset.redo}/redo`, { method: 'POST' }); haptic('medium'); toast('Qayta tayyorlanmoqda'); jobs(); } catch (e) { toast(e.message); } }));
   document.querySelectorAll('[data-del]').forEach((b) => (b.onclick = async () => { if (!confirm('O\'chirilsinmi? (yuklanmagan kliplari ham o\'chadi)')) return;
     try { await api('/api/jobs/' + b.dataset.del, { method: 'DELETE' }); jobs(); } catch (e) { toast(e.message); } }));
   bindCommon();
