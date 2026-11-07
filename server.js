@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const cfg = require('./src/config');
-const { db, getSettings, setSettings, log, parseClip, updateRow } = require('./src/db');
+const { db, getSettings, setSettings, log, parseClip, updateRow, setSecret } = require('./src/db');
 const pipeline = require('./src/pipeline');
 const yt = require('./src/youtube');
 const tg = require('./src/telegram');
@@ -59,7 +59,7 @@ async function overview() {
   const todayStart = Date.parse(dayKey() + 'T00:00:00Z') - 5 * 3600000;
   const s = getSettings();
   return {
-    channel, youtube: { configured: yt.configured(), connected: yt.connected(), canBrand: yt.canBrand() }, ai: ai.enabled(), bot: tg.enabled(),
+    channel, youtube: { configured: yt.configured(), connected: yt.connected(), canBrand: yt.canBrand() }, ai: ai.enabled(), aiProviders: ai.providers(), bot: tg.enabled(),
     counts: {
       queue: count("SELECT COUNT(*) n FROM jobs WHERE status IN ('queued','downloading','analyzing','rendering','waiting')"),
       drafts: count("SELECT COUNT(*) n FROM clips WHERE status = 'draft'"),
@@ -192,6 +192,17 @@ async function api(req, res, url) {
       log('Kanalga banner, tavsif va kalit so\'zlar o\'rnatildi');
       return send(res, 200, { ok: true, studio: `https://studio.youtube.com/channel/${id}/editing/profile` });
     } catch (e) { return send(res, 400, { error: e.message }); }
+  }
+  if (p === '/api/ai/gemini' && m === 'POST') {
+    const key = String(b.key || '').trim();
+    if (key && !/^[\w-]{20,}$/.test(key)) return send(res, 400, { error: 'Kalit noto\'g\'ri ko\'rinishda (AIza... bilan boshlanadi)' });
+    if (key) {
+      // check the key right away with a tiny request
+      const r = await fetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=1', { headers: { 'x-goog-api-key': key } }).catch(() => null);
+      if (r && (r.status === 400 || r.status === 401 || r.status === 403)) return send(res, 400, { error: 'Google bu kalitni qabul qilmadi' });
+    }
+    setSecret('gemini_key', key || null); log(key ? 'Gemini kaliti saqlandi' : 'Gemini kaliti o\'chirildi');
+    return send(res, 200, { providers: ai.providers() });
   }
   if (p === '/api/cookies' && m === 'GET') {
     const f = pipeline.COOKIES; const has = fs.existsSync(f);
@@ -330,7 +341,7 @@ async function checkTools() {
     try { await run(bin, [arg], { timeoutMs: 10000 }); } catch (e) { log(`${name} topilmadi — o'rnating (README ga qarang)`, 'error'); }
   }
   if (!cfg.FONT) log('Qalin shrift topilmadi: prevyu yozuvlari standart shriftda chiqadi (FONT_PATH ni sozlang)', 'warn');
-  if (!ai.enabled()) log('ANTHROPIC_API_KEY yo\'q — nom/tavsif shablondan olinadi, lahzalar faqat ovoz/harakat bo\'yicha tanlanadi', 'warn');
+  if (!ai.enabled()) log('AI kaliti yo\'q (Gemini yoki Claude) — nom/tavsif videoning o\'z ma\'lumotlaridan olinadi. Bepul: Sozlamalar → AI → Gemini kaliti', 'warn');
   if (!cfg.PUBLIC_URL.startsWith('https://')) log('PUBLIC_URL https emas — Telegram Web App va YouTube ulash ishlamaydi', 'warn');
 }
 

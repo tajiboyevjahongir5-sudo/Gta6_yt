@@ -59,7 +59,7 @@ async function home() {
   const connectCta = !o.youtube.connected ? `<div class="card" style="text-align:center"><div style="font-size:30px">📺</div><b>YouTube kanalingizni ulang</b>
     <p class="muted small">Videolar shu kanalga yuklanadi. Ulanganda kanal uchun nom, username, tavsif, banner va logo tayyorlab beriladi.</p>
     <button class="btn primary" id="cta" style="width:100%">Kanalni ulash</button></div>` : '';
-  if (!o.ai) warn.push('AI kaliti yo\'q: nom/tavsif shablondan olinadi');
+  if (!o.ai) warn.push('AI ulanmagan: videolar to\'liq tahlil qilinmaydi. <a href="#" data-go="settings" style="color:inherit">Bepul Gemini kalitini qo\'shing</a>');
   $('#view').innerHTML = `
     ${connectCta}${warn.map((w) => `<div class="warnbox">${w}</div>`).join('')}
     <div class="card"><div class="row"><input type="url" id="url" class="grow" placeholder="Stream yoki video havolasi (YouTube, Twitch, Kick)"><button class="btn primary" id="add">Qo'shish</button></div></div>
@@ -301,7 +301,11 @@ async function settings() {
     </div>
     <h2>Nom, tavsif, teglar</h2>
     <div class="card">
-      ${sw('useAI', 'AI yordamchi', o.ai ? 'Kadrlarni ko\'rib baholaydi va matnlarni yozadi' : 'ANTHROPIC_API_KEY sozlanmagan')}
+      ${sw('useAI', 'AI yordamchi', o.ai ? `Videoni o'rganadi, lahzalarni baholaydi, matnlarni yozadi (${o.aiProviders.map((x) => (x === 'gemini' ? 'Gemini' : 'Claude')).join(' → ')})` : 'Kalit yo\'q — pastdan bepul Gemini kalitini qo\'shing')}
+      <label class="f">Gemini API kaliti (bepul) ${o.aiProviders.includes('gemini') ? '✅' : ''}</label>
+      <div class="row"><input type="password" id="gkey" class="grow" placeholder="${o.aiProviders.includes('gemini') ? 'saqlangan — almashtirish uchun yangisini kiriting' : 'AIza...'}" autocomplete="off"><button class="btn sm" id="gsave">Saqlash</button></div>
+      <p class="small muted" style="margin:6px 0">Olish: <a href="#" id="glink" style="color:var(--blue)">aistudio.google.com/apikey</a> → <b>Create API key</b>. Karta kerak emas. Gemini ochiq YouTube videoni o'zi ko'radi (kuniga ~8 soatgacha bepul).</p>
+      ${o.aiProviders.length > 1 ? `<label class="f">Qaysi AI birinchi</label><select data-k="aiProvider">${[['auto', 'Avtomatik (avval bepul Gemini)'], ['gemini', 'Gemini'], ['claude', 'Claude']].map(([v, t]) => `<option value="${v}" ${s.aiProvider === v ? 'selected' : ''}>${t}</option>`).join('')}</select>` : ''}
       <label class="f">Video tili (nom, tavsif, teglar, subtitr)</label><select data-k="language">${[['en', 'Inglizcha'], ['ru', 'Ruscha'], ['uz', "O'zbekcha"]].map(([v, t]) => `<option value="${v}" ${s.language === v ? 'selected' : ''}>${t}</option>`).join('')}</select>
       ${inp('game', "Mavzu (bo'sh qoldiring — har video uchun AI o'zi aniqlaydi)")}
       ${inp('channelName', 'Kanal nomi')}
@@ -319,6 +323,9 @@ async function settings() {
   if ($('#yton')) $('#yton').onclick = connectYouTube;
   if ($('#ytsetup')) $('#ytsetup').onclick = async (e) => { e.preventDefault(); openYtSetup(await api('/api/youtube/setup')); };
   if ($('#brandBtn')) $('#brandBtn').onclick = openBrand;
+  $('#glink').onclick = (e) => { e.preventDefault(); ext('https://aistudio.google.com/apikey'); };
+  $('#gsave').onclick = async (e) => { const key = $('#gkey').value.trim(); if (!key) return toast('Kalitni kiriting');
+    e.target.disabled = true; try { await api('/api/ai/gemini', { method: 'POST', body: { key } }); haptic('medium'); toast('✅ Gemini ulandi'); settings(); } catch (er) { toast(er.message); e.target.disabled = false; } };
   api('/api/cookies').then((c) => { if ($('#ckState')) $('#ckState').textContent = c.has ? `✅ Yuklangan (${new Date(c.updated).toLocaleDateString('uz-UZ')})` : '18+ va "bot emasman" tekshiruvli videolar uchun kerak'; });
   if ($('#ckBtn')) $('#ckBtn').onclick = openCookies;
   if ($('#reconn')) $('#reconn').onclick = (e) => { e.preventDefault(); connectYouTube(); };

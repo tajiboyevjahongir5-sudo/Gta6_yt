@@ -79,7 +79,8 @@ Docker'siz: Node 22.13+, `ffmpeg`, `yt-dlp`, subtitr uchun `pip install faster-w
 | `ADMIN_IDS` | ha | Telegram ID'ingiz (botga yozing — u aytadi). Bir nechta bo'lsa vergul bilan |
 | `GOOGLE_CLIENT_ID` | yo'q | Web App ichida kiritiladi (Sozlamalar → YouTube'ni sozlash). Xohlasangiz shu yerga ham yozish mumkin |
 | `GOOGLE_CLIENT_SECRET` | yo'q | o'sha joyda |
-| `ANTHROPIC_API_KEY` | tavsiya | console.anthropic.com → API Keys |
+| `GEMINI_API_KEY` | tavsiya (bepul) | aistudio.google.com/apikey → Create API key. Web App ichida ham kiritiladi (Sozlamalar → AI) |
+| `ANTHROPIC_API_KEY` | ixtiyoriy (pullik) | console.anthropic.com → API Keys. Gemini limiti tugasa zaxira bo'lib ishlaydi |
 | `SESSION_SECRET` | tavsiya | istalgan uzun tasodifiy matn (masalan 40+ belgi) |
 | `WEBAPP_PASSWORD` | ixtiyoriy | panelni oddiy brauzerda ochish uchun parol |
 | `DATA_DIR` | ixtiyoriy | volume mount path'dan avtomatik olinadi |
@@ -112,6 +113,13 @@ Docker'siz: Node 22.13+, `ffmpeg`, `yt-dlp`, subtitr uchun `pip install faster-w
 > Audit tugaguncha bot videolarni tayyorlab beradi, siz ularni Panel'dan yuklab olib qo'lda joylashingiz mumkin.
 
 ### 4. AI (tavsiya etiladi)
+**Bepul variant — Google Gemini:** [aistudio.google.com/apikey](https://aistudio.google.com/apikey) → *Create API key* (karta kerak emas)
+→ Panel → ⚙️ → AI → kalitni qo'ying. Gemini ochiq YouTube videoni **o'zi ko'radi va eshitadi** (3 soatgacha bo'lgan videolar, bepul tarifda
+kuniga ~8 soat video). Uzunroq yoki YouTube'dan boshqa manbalarda — subtitr matni va kadrlar orqali tahlil qiladi.
+Cheklovlar: faqat ochiq videolar; bepul tarifda daqiqalik/kunlik limit bor (tugasa Claude'ga yoki shablonga o'tadi);
+bepul tarifda Google ma'lumotlardan mahsulotlarini yaxshilash uchun foydalanishi mumkin.
+
+**Pullik variant — Claude:**
 [console.anthropic.com](https://console.anthropic.com) dan kalit oling → `ANTHROPIC_API_KEY`. Bitta stream uchun bitta so'rov
 (~32 kichik kadr + matn), taxminan $0.05–0.15. Kalitsiz ham ishlaydi: lahzalar faqat ovoz/harakat bo'yicha, matnlar shablondan.
 

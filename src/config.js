@@ -34,6 +34,8 @@ module.exports = {
   GOOGLE_CLIENT_SECRET: env.GOOGLE_CLIENT_SECRET || '',
   ANTHROPIC_API_KEY: env.ANTHROPIC_API_KEY || '',
   AI_MODEL: env.AI_MODEL || 'claude-opus-5-5',
+  GEMINI_API_KEY: env.GEMINI_API_KEY || '',
+  GEMINI_MODEL: env.GEMINI_MODEL || '',
   FONT: findFont(),
   YTDLP: env.YTDLP_BIN || 'yt-dlp',
   FFMPEG: env.FFMPEG_BIN || 'ffmpeg',

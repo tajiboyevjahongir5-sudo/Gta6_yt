@@ -1,16 +1,99 @@
 // The AI studies the whole source video — its YouTube title/description/tags, the speech transcript, frames spread over
 // the full length and frames from each candidate moment — works out what the video actually is (which game, sport,
 // vlog, podcast…), re-ranks the moments and writes metadata that matches THIS video.
-// Without ANTHROPIC_API_KEY everything falls back to the source video's own metadata, so the pipeline still works.
+// Providers: Google Gemini (free tier; can watch a public YouTube video directly) and Anthropic Claude.
+// Without any key everything falls back to the source video's own metadata, so the pipeline still works.
 const fs = require('fs');
-const { ANTHROPIC_API_KEY, AI_MODEL } = require('./config');
-const { log } = require('./db');
+const { ANTHROPIC_API_KEY, AI_MODEL, GEMINI_API_KEY, GEMINI_MODEL } = require('./config');
+const { log, getSecret, getSettings } = require('./db');
 
+// ---------- providers ----------
+// Generic message parts: { text } | { image: '/path.jpg' }. Each provider converts them to its own format.
 let client = null;
 function getClient() {
   if (!ANTHROPIC_API_KEY) return null;
   if (!client) { const Anthropic = require('@anthropic-ai/sdk'); client = new Anthropic({ apiKey: ANTHROPIC_API_KEY }); }
   return client;
+}
+const geminiKey = () => getSecret('gemini_key') || GEMINI_API_KEY || '';
+const b64 = (f) => fs.readFileSync(f).toString('base64');
+
+async function callClaude({ parts, schema, effort = 'medium', maxTokens = 10000 }) {
+  const c = getClient(); if (!c) throw new Error('Claude kaliti yo\'q');
+  const res = await c.beta.messages.create({
+    model: AI_MODEL, max_tokens: maxTokens,
+    betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default',
+    output_config: { effort, format: { type: 'json_schema', schema } },
+    messages: [{ role: 'user', content: parts.map((p) => (p.image
+      ? { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: b64(p.image) } } : { type: 'text', text: p.text })) }],
+  });
+  if (res.stop_reason === 'refusal') throw new Error('Claude so\'rovni rad etdi');
+  return JSON.parse(res.content.filter((b) => b.type === 'text').map((b) => b.text).join(''));
+}
+
+// Gemini's structured output takes an OpenAPI-style schema: upper-case types, no additionalProperties
+function toGeminiSchema(js) {
+  if (Array.isArray(js)) return js.map(toGeminiSchema);
+  if (!js || typeof js !== 'object') return js;
+  const out = {};
+  for (const [k, v] of Object.entries(js)) {
+    if (k === 'additionalProperties') continue;
+    if (k === 'type') out.type = String(v).toUpperCase();
+    else if (k === 'properties') out.properties = Object.fromEntries(Object.entries(v).map(([pk, pv]) => [pk, toGeminiSchema(pv)]));
+    else if (k === 'items') out.items = toGeminiSchema(v);
+    else out[k] = v;
+  }
+  return out;
+}
+// model ids change over time: try the configured one, then the "latest" alias, then known stable ones
+const GEMINI_MODELS = () => [...new Set([GEMINI_MODEL, 'gemini-flash-latest', 'gemini-2.5-flash', 'gemini-2.0-flash'].filter(Boolean))];
+let geminiWorking = null;
+// youtube: { url, fps } — Gemini watches a public YouTube video itself (picture + sound), no download needed
+async function callGemini({ parts, schema, youtube }) {
+  const key = geminiKey(); if (!key) throw new Error('Gemini kaliti yo\'q');
+  const gparts = parts.map((p) => (p.image ? { inlineData: { mimeType: 'image/jpeg', data: b64(p.image) } } : { text: p.text }));
+  const build = (withVideo) => ({
+    contents: [{ role: 'user', parts: withVideo && youtube
+      ? [{ fileData: { fileUri: youtube.url }, videoMetadata: { fps: youtube.fps || 0.5 } }, ...gparts] : gparts }],
+    generationConfig: { responseMimeType: 'application/json', responseSchema: toGeminiSchema(schema),
+      ...(withVideo && youtube ? { mediaResolution: 'MEDIA_RESOLUTION_LOW' } : {}) },
+  });
+  let lastErr;
+  for (const withVideo of youtube ? [true, false] : [false]) {
+    for (const model of geminiWorking ? [geminiWorking] : GEMINI_MODELS()) {
+      const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+        method: 'POST', headers: { 'content-type': 'application/json', 'x-goog-api-key': key }, body: JSON.stringify(build(withVideo)) });
+      const j = await r.json().catch(() => ({}));
+      if (r.ok) {
+        geminiWorking = model;
+        const text = (j.candidates?.[0]?.content?.parts || []).map((x) => x.text || '').join('');
+        if (!text) { lastErr = new Error('Gemini bo\'sh javob qaytardi (' + (j.candidates?.[0]?.finishReason || j.promptFeedback?.blockReason || '?') + ')'); break; }
+        if (withVideo) log(`Gemini videoni to'liq ko'rdi (${model})`);
+        return JSON.parse(text.replace(/^```(?:json)?\s*|\s*```$/g, ''));
+      }
+      lastErr = new Error(`Gemini ${r.status}: ${j.error?.message || ''}`.slice(0, 300));
+      if (r.status === 429) { lastErr.quota = true; throw lastErr; } // free daily/minute limit reached
+      if (r.status === 404) continue;                                // unknown model id: try the next one
+      break;                                                          // e.g. video not public/too long: retry without the video
+    }
+  }
+  throw lastErr;
+}
+
+// order: the owner's choice in settings; "auto" = Gemini first (free), then Claude
+function providers() {
+  const pref = getSettings().aiProvider || 'auto';
+  const have = { gemini: !!geminiKey(), claude: !!ANTHROPIC_API_KEY };
+  const order = pref === 'claude' ? ['claude', 'gemini'] : ['gemini', 'claude'];
+  return order.filter((p) => have[p]);
+}
+const enabled = () => providers().length > 0;
+async function generateJSON({ parts, schema, youtube, effort, maxTokens }) {
+  for (const p of providers()) {
+    try { return { data: p === 'gemini' ? await callGemini({ parts, schema, youtube }) : await callClaude({ parts, schema, effort, maxTokens }), provider: p }; }
+    catch (e) { log(`AI (${p}) xatosi: ${e.message}${e.quota ? ' — bepul limit tugadi, keyingi variantga o\'tilmoqda' : ''}`, 'warn'); }
+  }
+  return null;
 }
 
 const LANG = { uz: 'Uzbek (Latin script)', ru: 'Russian', en: 'English' };
@@ -50,31 +133,29 @@ const SCHEMA = {
       } },
   },
 };
-const img = (f) => ({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: fs.readFileSync(f).toString('base64') } });
-
-// context: { meta: {title, description, tags, categories, channel, chapters, duration}, transcript, overview: [jpg] }
+// context: { meta: {title, description, tags, categories, channel, chapters, duration}, transcript, overview: [jpg], youtube: {url, fps} }
 async function rankAndDescribe({ candidates, source, settings, context = {} }) {
-  const c = getClient();
-  if (!c || !settings.useAI) return null;
+  if (!enabled() || !settings.useAI) return null;
   const m = context.meta || {};
-  const content = [{ type: 'text', text:
+  const parts = [{ text:
     `SOURCE VIDEO\nTitle: ${m.title || source.title || '?'}\nChannel: ${m.channel || source.author || '?'}\n` +
     `Duration: ${Math.round((m.duration || 0) / 60)} min\nYouTube category: ${(m.categories || []).join(', ') || '?'}\n` +
     `Tags: ${(m.tags || []).slice(0, 30).join(', ') || '-'}\n` +
     (m.chapters?.length ? `Chapters: ${m.chapters.map((ch) => `${Math.round(ch.start_time)}s ${ch.title}`).join(' | ')}\n` : '') +
     `Description:\n${String(m.description || '').slice(0, 3000)}\n\n` +
-    (context.transcript ? `TRANSCRIPT (auto captions, may be imperfect):\n${context.transcript}\n` : 'No transcript available.\n') }];
+    (context.transcript ? `TRANSCRIPT (auto captions, may be imperfect):\n${context.transcript}\n` : 'No transcript available.\n') +
+    (context.youtube ? '\nThe full video itself is attached as well — watch and listen to it.\n' : '') }];
   if (context.overview?.length) {
-    content.push({ type: 'text', text: `Frames spread over the whole video (start → end):` });
-    for (const f of context.overview) content.push(img(f));
+    parts.push({ text: 'Frames spread over the whole video (start → end):' });
+    for (const f of context.overview) parts.push({ image: f });
   }
   candidates.forEach((cand, i) => {
-    content.push({ type: 'text', text: `Candidate moment #${i} (${Math.round(cand.start)}–${Math.round(cand.end)} s, loudness/motion score ${cand.score}):` });
-    for (const f of cand.frames) content.push(img(f));
+    parts.push({ text: `Candidate moment #${i} (${Math.round(cand.start)}–${Math.round(cand.end)} s, loudness/motion score ${cand.score}):` });
+    for (const f of cand.frames) parts.push({ image: f });
   });
-  content.push({ type: 'text', text:
+  parts.push({ text:
     `The candidate moments were found automatically by loudness and motion in the source video above.\n` +
-    `1) First work out what this video really is from ALL the evidence (metadata, transcript, frames): the exact game or topic. ` +
+    `1) First work out what this video really is from ALL the evidence (metadata, transcript, frames${context.youtube ? ', the video itself' : ''}): the exact game or topic. ` +
     `Never assume a game that the evidence doesn't show.` +
     (settings.game ? ` The channel owner says the topic is usually "${settings.game}" — use it only if the evidence agrees.` : '') + `\n` +
     `2) Score each moment 0-10 for a viewer of this kind of content (low for menus, loading screens, AFK, black screens, ads, silence).\n` +
@@ -83,24 +164,15 @@ async function rankAndDescribe({ candidates, source, settings, context = {} }) {
     `Everything must describe what is actually in this video; use real names (game, people, teams) when the evidence shows them.\n` +
     `Write in ${LANG[settings.language] || settings.language}. Channel name: ${settings.channelName}. ` +
     `Do not mock the original creator, do not invent events, do not use clickbait the video doesn't deliver.` });
-
-  try {
-    const res = await c.beta.messages.create({
-      model: AI_MODEL,
-      max_tokens: 10000,
-      betas: ['server-side-fallback-2026-07-01'],
-      fallbacks: 'default',
-      output_config: { effort: 'medium', format: { type: 'json_schema', schema: SCHEMA } },
-      messages: [{ role: 'user', content }],
-    });
-    if (res.stop_reason === 'refusal') { log('AI so\'rovni rad etdi, videoning o\'z ma\'lumotlari ishlatiladi', 'warn'); return null; }
-    const out = JSON.parse(res.content.filter((b) => b.type === 'text').map((b) => b.text).join(''));
-    out.video.categoryId = CATEGORIES[out.video.category] || '24';
-    return out;
-  } catch (e) {
-    log('AI xatosi: ' + (e.status ? e.status + ' ' : '') + e.message, 'warn');
-    return null;
-  }
+  const r = await generateJSON({ parts, schema: SCHEMA, youtube: context.youtube });
+  if (!r) return null;
+  const out = r.data;
+  if (!out?.video || !Array.isArray(out.moments) || !out.long) { log(`AI (${r.provider}) javobi to'liq emas, videoning o'z ma'lumotlari ishlatiladi`, 'warn'); return null; }
+  out.video.categoryId = CATEGORIES[out.video.category] || '24';
+  out.video.badge = String(out.video.badge || '').slice(0, 12);
+  for (const mo of out.moments) if (!EMOJIS.includes(mo.emoji)) mo.emoji = '🔥';
+  out.provider = r.provider;
+  return out;
 }
 
 // no AI: build everything from the source video's own YouTube metadata
@@ -123,4 +195,4 @@ function templateMeta({ source, settings, count, meta = {} }) {
 }
 const t = (s) => s.slice(0, 100);
 
-module.exports = { rankAndDescribe, templateMeta, EMOJIS, getClient, LANG, enabled: () => !!ANTHROPIC_API_KEY };
+module.exports = { rankAndDescribe, templateMeta, generateJSON, providers, geminiKey, EMOJIS, getClient, LANG, enabled };

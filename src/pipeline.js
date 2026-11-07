@@ -165,7 +165,12 @@ async function processJob(job) {
     // frames spread over the whole video, so the AI understands what it is, not just the loud bits
     const overview = [];
     for (let k = 1; k <= 8; k++) overview.push(await render.grabFrame(src, (info.duration * k) / 9, path.join(dir, `ov${k}.jpg`)));
-    aiRes = await ai.rankAndDescribe({ candidates: cands, source: job, settings, context: { meta, transcript, overview } });
+    // public YouTube video, not too long: Gemini can watch the whole thing itself (fewer frames per second for long ones)
+    const isYT = /youtube\.com|youtu\.be/.test(job.url) && !!job.video_id;
+    const youtube = isYT && info.duration <= settings.aiWatchMaxMinutes * 60
+      ? { url: `https://www.youtube.com/watch?v=${job.video_id}`, fps: info.duration <= 3600 ? 0.5 : 0.2 } : null;
+    aiRes = await ai.rankAndDescribe({ candidates: cands, source: job, settings, context: { meta, transcript, overview, youtube } });
+    if (aiRes) setJob(job.id, { step: `AI: ${aiRes.provider === 'gemini' ? 'Gemini' : 'Claude'}` });
     candidates.length = cands.length;
   }
   const tpl = ai.templateMeta({ source: job, settings, count: settings.highlightCount, meta });

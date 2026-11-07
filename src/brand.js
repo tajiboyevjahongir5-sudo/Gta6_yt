@@ -53,21 +53,14 @@ function templateKit(s) {
 }
 
 async function aiKit(s, hint) {
-  const c = ai.getClient(); if (!c || !s.useAI) return null;
-  try {
-    const res = await c.beta.messages.create({
-      model: process.env.AI_MODEL || 'claude-opus-5-5', max_tokens: 4000,
-      betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default',
-      output_config: { effort: 'medium', format: { type: 'json_schema', schema: SCHEMA } },
-      messages: [{ role: 'user', content:
-        `Create a YouTube channel brand for a channel that posts ${topic(s)} highlights from long videos and streams: long compilations and Shorts ` +
-        `(funny moments, chases, fails, epic plays). Audience: worldwide, English. ` +
-        `Don't use official brand or company names as the channel name so it isn't confused with an official channel.` +
-        (hint ? `\nOwner's wishes: ${hint}` : '') + `\nWrite everything in ${ai.LANG[s.language] || 'English'}.` }],
-    });
-    if (res.stop_reason === 'refusal') return null;
-    return JSON.parse(res.content.filter((b) => b.type === 'text').map((b) => b.text).join(''));
-  } catch (e) { log('Brend AI xatosi: ' + e.message, 'warn'); return null; }
+  if (!ai.enabled() || !s.useAI) return null;
+  const r = await ai.generateJSON({ schema: SCHEMA, maxTokens: 4000, parts: [{ text:
+    `Create a YouTube channel brand for a channel that posts ${topic(s)} highlights from long videos and streams: long compilations and Shorts ` +
+    `(funny moments, fails, epic plays). Audience: worldwide. ` +
+    `Don't use official brand or company names as the channel name so it isn't confused with an official channel.` +
+    (hint ? `\nOwner's wishes: ${hint}` : '') + `\nWrite everything in ${ai.LANG[s.language] || 'English'}.` }] });
+  const k = r?.data;
+  return k && Array.isArray(k.names) && k.names.length ? k : null;
 }
 
 // a clean frame (no burned-in text) from the best compilation makes the banner look like the channel's content

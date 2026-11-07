@@ -51,6 +51,8 @@ const DEFAULTS = {
   accent: '#FFD400',           // thumbnail text colour
   keepSource: false,           // delete downloaded stream after rendering
   useAI: true,
+  aiProvider: 'auto',          // auto (Gemini first — free, then Claude) | gemini | claude
+  aiWatchMaxMinutes: 180,      // Gemini watches the whole YouTube video itself if it is at most this long
   subtitles: true,             // word-by-word captions on Shorts (needs python3 + faster-whisper)
   whisperModel: 'small',       // tiny | base | small | medium (bigger = more accurate, slower)
   subtitleLang: 'auto',        // language the streamer SPEAKS: auto | uz | ru | en
