@@ -1,9 +1,12 @@
 const { spawn } = require('child_process');
+const os = require('os');
 
 // Run a command, collect stdout/stderr. onLine gets every stderr+stdout line (for progress parsing).
 function run(cmd, args, { onLine, timeoutMs = 0, cwd } = {}) {
   return new Promise((resolve, reject) => {
     const p = spawn(cmd, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
+    // heavy work (ffmpeg, yt-dlp, whisper) runs at low priority so the web app and bot stay responsive
+    try { if (p.pid) os.setPriority(p.pid, 15); } catch (e) {}
     let out = '', err = '', bufO = '', bufE = '';
     const feed = (chunk, which) => {
       const s = chunk.toString();

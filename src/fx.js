@@ -26,8 +26,15 @@ const SFX = {
 async function sfx(name) {
   fs.mkdirSync(SFX_DIR, { recursive: true });
   for (const ext of ['wav', 'mp3', 'ogg']) { const f = path.join(SFX_DIR, `${name}.${ext}`); if (fs.existsSync(f)) return f; }
-  const f = path.join(SFX_DIR, `${name}.wav`);
-  await run(FFMPEG, ['-y', '-hide_banner', '-loglevel', 'error', ...SFX[name], '-ac', '2', f]);
+  // generated files carry an explicit stereo layout (WAV loses it and older ffmpeg can't mix "unknown 2-channel" audio)
+  const f = path.join(SFX_DIR, `${name}.gen3.flac`);
+  if (fs.existsSync(f)) return f;
+  const pan = SFX[name].includes('-af') ? [] : ['-af', 'pan=stereo|c0=c0|c1=c0'];
+  const args = [...SFX[name]];
+  if (!pan.length) { const i = args.indexOf('-af'); args[i + 1] += ',pan=stereo|c0=c0|c1=c0'; }
+  const fc = args.indexOf('-filter_complex');
+  if (fc >= 0) args[fc + 1] += ',pan=stereo|c0=c0|c1=c0';
+  await run(FFMPEG, ['-y', '-hide_banner', '-loglevel', 'error', ...args, ...(fc >= 0 ? [] : pan), '-ar', '48000', f]);
   return f;
 }
 
@@ -86,19 +93,19 @@ async function buildGraph(events, { vIn, aIn, firstIdx, emojiSize = 300 }) {
   for (const e of events) {
     if (e.emoji) {
       const dir = await emojiFrames(e.emoji); if (!dir) continue;
-      inputs.push('-framerate', '30', '-i', path.join(dir, '%03d.png'));
+      inputs.push('-reinit_filter', '0', '-framerate', '30', '-i', path.join(dir, '%03d.png'));
       const canvas = Math.round(emojiSize * 1.6);
       vParts.push(`[${idx}:v]format=rgba,setpts=PTS-STARTPTS+${e.t.toFixed(3)}/TB[em${k}];[${v}][em${k}]overlay=${e.x - (canvas - emojiSize) / 2}:${e.y - (canvas - emojiSize) / 2}:eof_action=pass:format=auto[vx${k}]`);
       v = `vx${k}`; idx++; k++;
     } else if (e.sfx) {
-      try { inputs.push('-i', await sfx(e.sfx)); } catch (err) { log('SFX yaratilmadi: ' + err.message, 'warn'); continue; }
+      try { inputs.push('-reinit_filter', '0', '-i', await sfx(e.sfx)); } catch (err) { log('SFX yaratilmadi: ' + err.message, 'warn'); continue; }
       const ms = Math.max(0, Math.round(e.t * 1000));
-      aParts.push(`[${idx}:a]aformat=sample_rates=48000:channel_layouts=stereo,volume=${e.vol ?? 0.5},adelay=${ms}|${ms}[sx${idx}]`);
+      aParts.push(`[${idx}:a]aresample=48000,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,volume=${e.vol ?? 0.5},adelay=${ms}|${ms}[sx${idx}]`);
       aLabels.push(`[sx${idx}]`); idx++;
     }
   }
   let a = aIn;
-  if (aLabels.length) { aParts.push(`[${aIn}]${aLabels.join('')}amix=inputs=${aLabels.length + 1}:normalize=0:duration=first[amix]`); a = 'amix'; }
+  if (aLabels.length) { aParts.push(`[${aIn}]${aLabels.join('')}amix=inputs=${aLabels.length + 1}:normalize=0:duration=first,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[amix]`); a = 'amix'; }
   return { inputs, filter: [...vParts, ...aParts].join(';'), vOut: v, aOut: a };
 }
 

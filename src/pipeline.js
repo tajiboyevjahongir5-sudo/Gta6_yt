@@ -60,7 +60,16 @@ function addJob(url, sourceId = null, meta = {}) {
   kick();
   return { id: Number(r.lastInsertRowid) };
 }
-const setJob = (id, patch) => updateRow('jobs', id, { ...patch, updated_at: Date.now() });
+const lastProgress = new Map();
+const setJob = (id, patch) => {
+  // progress-only updates arrive many times a second from ffmpeg/yt-dlp: write at most ~1/s or per 1%
+  if (Object.keys(patch).length === 1 && 'progress' in patch) {
+    const prev = lastProgress.get(id) || { t: 0, p: -1 };
+    if (Date.now() - prev.t < 1000 && Math.abs(patch.progress - prev.p) < 0.01) return;
+    lastProgress.set(id, { t: Date.now(), p: patch.progress });
+  }
+  updateRow('jobs', id, { ...patch, updated_at: Date.now() });
+};
 
 const BLOCKED = /confirm your age|Sign in to confirm|not a bot|cookies/i;
 // YouTube sometimes blocks the default web client from data-centre IPs but lets other official clients through
@@ -296,6 +305,44 @@ async function uploadClip(c) {
 }
 
 // ---------------- stats ----------------
+// whole-channel refresh: every video's views/likes/comments + channel totals. Throttled so the stats page can ask often.
+let channelRefresh = { at: 0, running: null, error: null };
+function refreshChannel(maxAgeMs = 60000) {
+  if (!yt.connected()) return Promise.resolve(false);
+  if (channelRefresh.running) return channelRefresh.running;
+  if (Date.now() - channelRefresh.at < maxAgeMs) return Promise.resolve(false);
+  channelRefresh.running = (async () => {
+    try {
+      const { channel, videos } = await yt.channelVideos();
+      const up = db.prepare(`INSERT INTO channel_videos (id, title, thumb, published, views, likes, comments, duration, privacy, updated) VALUES (?,?,?,?,?,?,?,?,?,?)
+        ON CONFLICT(id) DO UPDATE SET title=excluded.title, thumb=excluded.thumb, views=excluded.views, likes=excluded.likes, comments=excluded.comments,
+        duration=excluded.duration, privacy=excluded.privacy, updated=excluded.updated`);
+      const now = Date.now();
+      db.exec('BEGIN');
+      for (const v of videos) up.run(v.id, v.title, v.thumb, v.published, v.views, v.likes, v.comments, v.duration, v.privacy, now);
+      // videos deleted on YouTube disappear from the list
+      if (videos.length) db.prepare(`DELETE FROM channel_videos WHERE updated < ?`).run(now);
+      db.exec('COMMIT');
+      if (channel) db.prepare('INSERT INTO channel_daily (day, subscribers, views, videos) VALUES (?, ?, ?, ?) ON CONFLICT(day) DO UPDATE SET subscribers=excluded.subscribers, views=excluded.views, videos=excluded.videos')
+        .run(dayKey(), channel.subscribers, channel.views, channel.videos);
+      // keep the clips table (Lahza uploads) in sync too
+      const byId = new Map(videos.map((v) => [v.id, v]));
+      for (const c of db.prepare("SELECT id, youtube_id FROM clips WHERE youtube_id IS NOT NULL").all()) {
+        const v = byId.get(c.youtube_id); if (v) updateRow('clips', c.id, { views: v.views, likes: v.likes, comments: v.comments, stats_at: now });
+      }
+      channelRefresh.error = null; channelRefresh.at = Date.now();
+      return true;
+    } catch (e) {
+      try { db.exec('ROLLBACK'); } catch (er) {}
+      channelRefresh.error = e.message; channelRefresh.at = Date.now();
+      log('Kanal statistikasi yangilanmadi: ' + e.message, 'warn');
+      return false;
+    } finally { channelRefresh.running = null; }
+  })();
+  return channelRefresh.running;
+}
+const channelRefreshState = () => ({ at: channelRefresh.at, error: channelRefresh.error, running: !!channelRefresh.running });
+
 async function refreshStats() {
   if (!yt.connected()) return;
   try {
@@ -392,6 +439,7 @@ function start() {
   const every = (ms, fn) => { const tick = () => fn().catch((e) => log(e.message, 'warn')).finally(() => setTimeout(tick, ms)); setTimeout(tick, 15000); };
   every(20 * 60000, checkSources);
   every(3 * 3600000, refreshStats);
+  every(10 * 60000, () => refreshChannel(5 * 60000));
 }
 
-module.exports = { COOKIES, UPLOAD_DIR, saveCookies, start, addJob, addSource, checkSources, scheduleClip, refreshStats, announceClip, chooseMoments, normalizeSourceUrl, kick };
+module.exports = { refreshChannel, channelRefreshState, COOKIES, UPLOAD_DIR, saveCookies, start, addJob, addSource, checkSources, scheduleClip, refreshStats, announceClip, chooseMoments, normalizeSourceUrl, kick };

@@ -54,12 +54,16 @@ const clipView = (c) => { c = parseClip(c); if (!c) return null;
 const jobView = (j) => ({ ...j, clips: db.prepare('SELECT COUNT(*) n FROM clips WHERE job_id = ?').get(j.id).n });
 const count = (sql, ...a) => db.prepare(sql).get(...a).n;
 
+// on Railway without a volume everything (channel connection, keys, clips) is wiped on every deploy
+// (Railway always sets RAILWAY_VOLUME_MOUNT_PATH when a volume is attached; DATA_DIR alone, e.g. ./data, is not persistent there)
+const ephemeralStorage = () => !!(process.env.RAILWAY_PROJECT_ID || process.env.RAILWAY_ENVIRONMENT_NAME) &&
+  !(process.env.RAILWAY_VOLUME_MOUNT_PATH && path.resolve(cfg.DATA_DIR).startsWith(path.resolve(process.env.RAILWAY_VOLUME_MOUNT_PATH)));
 async function overview() {
   let channel = null; try { channel = await yt.channelInfo(); } catch (e) { channel = { error: e.message }; }
   const todayStart = Date.parse(dayKey() + 'T00:00:00Z') - 5 * 3600000;
   const s = getSettings();
   return {
-    channel, youtube: { configured: yt.configured(), connected: yt.connected(), canBrand: yt.canBrand() }, ai: ai.enabled(), aiProviders: ai.providers(), bot: tg.enabled(),
+    storage: { persistent: !ephemeralStorage() }, channel, youtube: { configured: yt.configured(), connected: yt.connected(), canBrand: yt.canBrand() }, ai: ai.enabled(), aiProviders: ai.providers(), bot: tg.enabled(),
     counts: {
       queue: count("SELECT COUNT(*) n FROM jobs WHERE status IN ('queued','downloading','analyzing','rendering','waiting')"),
       drafts: count("SELECT COUNT(*) n FROM clips WHERE status = 'draft'"),
@@ -75,24 +79,29 @@ async function overview() {
   };
 }
 
-function stats(days) {
+function stats(days, sort = 'new') {
   const since = dayKey(Date.now() - (days - 1) * 86400000);
-  // views gained per day = today's total - yesterday's total, per clip
-  const rows = db.prepare('SELECT day, clip_id, views, likes FROM stats_daily WHERE day >= ? ORDER BY clip_id, day').all(dayKey(Date.now() - days * 86400000));
-  const gained = {}; const last = {};
-  for (const r of rows) {
-    const prev = last[r.clip_id]; last[r.clip_id] = r;
-    if (r.day < since) continue;
-    gained[r.day] = (gained[r.day] || 0) + (prev ? Math.max(0, r.views - prev.views) : r.views);
-  }
+  // views gained per day: difference of the channel's total views between daily snapshots
+  // (falls back to per-clip snapshots for days before the channel was tracked)
+  const ch = db.prepare('SELECT day, views, subscribers FROM channel_daily WHERE day >= ? ORDER BY day').all(dayKey(Date.now() - days * 86400000));
+  const chGain = {}; for (let i = 1; i < ch.length; i++) chGain[ch[i].day] = Math.max(0, ch[i].views - ch[i - 1].views);
+  const rows = db.prepare('SELECT day, clip_id, views FROM stats_daily WHERE day >= ? ORDER BY clip_id, day').all(dayKey(Date.now() - days * 86400000));
+  const clipGain = {}; const last = {};
+  for (const r of rows) { const prev = last[r.clip_id]; last[r.clip_id] = r; if (prev) clipGain[r.day] = (clipGain[r.day] || 0) + Math.max(0, r.views - prev.views); }
   const series = [];
-  for (let i = days - 1; i >= 0; i--) { const d = dayKey(Date.now() - i * 86400000); series.push({ day: d, views: gained[d] || 0,
-    uploads: count('SELECT COUNT(*) n FROM clips WHERE published_at >= ? AND published_at < ?', Date.parse(d + 'T00:00:00Z') - 18000000, Date.parse(d + 'T00:00:00Z') + 86400000 - 18000000) }); }
-  const subs = db.prepare('SELECT day, subscribers FROM channel_daily WHERE day >= ? ORDER BY day').all(since);
-  const byKind = db.prepare("SELECT kind, COUNT(*) videos, COALESCE(SUM(views),0) views, COALESCE(SUM(likes),0) likes FROM clips WHERE status = 'published' GROUP BY kind").all();
-  const top = db.prepare("SELECT * FROM clips WHERE status = 'published' ORDER BY views DESC LIMIT 10").all().map(clipView);
-  return { series, subs, byKind, top };
+  for (let i = days - 1; i >= 0; i--) { const d = dayKey(Date.now() - i * 86400000); series.push({ day: d, views: chGain[d] ?? clipGain[d] ?? 0,
+    uploads: count('SELECT COUNT(*) n FROM channel_videos WHERE published >= ? AND published < ?', Date.parse(d + 'T00:00:00Z') - 18000000, Date.parse(d + 'T00:00:00Z') + 86400000 - 18000000) }); }
+  const subs = ch.filter((r) => r.day >= since).map((r) => ({ day: r.day, subscribers: r.subscribers }));
+  const order = { new: 'published DESC', views: 'views DESC', likes: 'likes DESC', comments: 'comments DESC' }[sort] || 'published DESC';
+  const lahza = new Set(db.prepare('SELECT youtube_id FROM clips WHERE youtube_id IS NOT NULL').all().map((r) => r.youtube_id));
+  const videos = db.prepare(`SELECT * FROM channel_videos ORDER BY ${order} LIMIT 500`).all()
+    .map((v) => ({ ...v, short: v.duration > 0 && v.duration <= 180, lahza: lahza.has(v.id) }));
+  const kinds = { long: { videos: 0, views: 0, likes: 0 }, short: { videos: 0, views: 0, likes: 0 } };
+  for (const v of videos) { const k = kinds[v.short ? 'short' : 'long']; k.videos++; k.views += v.views; k.likes += v.likes; }
+  const byKind = Object.entries(kinds).map(([kind, v]) => ({ kind, ...v }));
+  return { series, subs, byKind, videos, channel: getSecretSafe('channel'), refresh: pipeline.channelRefreshState(), connected: yt.connected() };
 }
+const getSecretSafe = (k) => { try { return require('./src/db').getSecret(k); } catch (e) { return null; } };
 
 // ---------- API router ----------
 async function api(req, res, url) {
@@ -180,8 +189,14 @@ async function api(req, res, url) {
     return send(res, 200, { ok: true });
   }
 
-  if (p === '/api/stats') return send(res, 200, stats(Math.min(90, Math.max(7, Number(url.searchParams.get('days')) || 30))));
-  if (p === '/api/stats/refresh' && m === 'POST') { await pipeline.refreshStats(); return send(res, 200, { ok: true }); }
+  if (p === '/api/stats') {
+    // first visit with no data yet: wait for the first fetch; afterwards answer from cache and refresh in the background
+    const empty = !count('SELECT COUNT(*) n FROM channel_videos');
+    const r = pipeline.refreshChannel(60000);
+    if (empty) await r;
+    return send(res, 200, stats(Math.min(90, Math.max(7, Number(url.searchParams.get('days')) || 30)), url.searchParams.get('sort')));
+  }
+  if (p === '/api/stats/refresh' && m === 'POST') { await pipeline.refreshChannel(0); return send(res, 200, { ok: true }); }
 
   if (p === '/api/sources' && m === 'GET') return send(res, 200, db.prepare('SELECT id, url, name, keyword, min_minutes, permission, credit, active, last_checked FROM sources ORDER BY id DESC').all());
   if (p === '/api/sources' && m === 'POST') { try { return send(res, 200, await pipeline.addSource(b)); } catch (e) { return send(res, 400, { error: e.message.includes('UNIQUE') ? 'Bu manba allaqachon bor' : e.message }); } }
@@ -373,6 +388,7 @@ async function checkTools() {
   }
   if (!cfg.FONT) log('Qalin shrift topilmadi: prevyu yozuvlari standart shriftda chiqadi (FONT_PATH ni sozlang)', 'warn');
   if (!ai.enabled()) log('AI kaliti yo\'q (Gemini yoki Claude) — nom/tavsif videoning o\'z ma\'lumotlaridan olinadi. Bepul: Sozlamalar → AI → Gemini kaliti', 'warn');
+  if (ephemeralStorage()) log('DIQQAT: Railway Volume ulanmagan — har deployda kanal ulanishi, kalitlar va kliplar o\'chadi. Railway → servis → Volume qo\'shing (mount path /data)', 'error');
   if (!cfg.PUBLIC_URL.startsWith('https://')) log('PUBLIC_URL https emas — Telegram Web App va YouTube ulash ishlamaydi', 'warn');
 }
 

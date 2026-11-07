@@ -5,6 +5,7 @@ const { run, fmtTime } = require('./util');
 const { FFMPEG, FONT } = require('./config');
 const { SAFE, buildAss } = require('./subtitles');
 const fx = require('./fx');
+const { log } = require('./db');
 
 const FPS = 30;
 // ffmpeg filter-graph escaping for values like a font path
@@ -22,7 +23,15 @@ function wrap(text, width, lines) {
 
 // cut one segment to a normalized clip (same size/fps/audio so they concat cleanly)
 // effects: whoosh on the cut, boom + animated emoji on the peak moment
-async function cutSegment(src, seg, out, { width = 1920, height = 1080, label, workDir, effects = true }) {
+async function cutSegment(src, seg, out, opts) {
+  try { return await cutSegmentRaw(src, seg, out, opts); }
+  catch (e) {
+    if (opts.effects === false) throw e;
+    log('Effektli montaj xato berdi, effektlarsiz qayta yig\'ilmoqda: ' + e.message.slice(0, 200), 'warn');
+    return cutSegmentRaw(src, seg, out, { ...opts, effects: false });
+  }
+}
+async function cutSegmentRaw(src, seg, out, { width = 1920, height = 1080, label, workDir, effects = true }) {
   const dur = seg.end - seg.start; const fd = 0.35;
   let vf = `scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=${FPS}` +
     `,fade=t=in:st=0:d=${fd},fade=t=out:st=${(dur - fd).toFixed(2)}:d=${fd}`;
@@ -32,11 +41,11 @@ async function cutSegment(src, seg, out, { width = 1920, height = 1080, label, w
   }
   const g = effects ? await fx.buildGraph(fx.planEvents({ dur, peakT: seg.peak - seg.start, peakEmoji: seg.emoji || '🔥', maxExtra: 0,
     area: { x: width - 620, y: 90, w: 560, h: 420, size: 260 } }), { vIn: 'v0', aIn: 'a0', firstIdx: 1, emojiSize: 260 }) : null;
-  const fc = `[0:v]${vf}[v0];[0:a]aresample=48000,afade=t=in:st=0:d=${fd},afade=t=out:st=${(dur - fd).toFixed(2)}:d=${fd}[a0]` +
+  const fc = `[0:v]${vf}[v0];[0:a]aresample=48000,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,afade=t=in:st=0:d=${fd},afade=t=out:st=${(dur - fd).toFixed(2)}:d=${fd}[a0]` +
     (g && g.filter ? ';' + g.filter : '');
   await run(FFMPEG, ['-y', '-hide_banner', '-loglevel', 'error', '-ss', String(seg.start), '-t', dur.toFixed(2), '-i', src, ...(g ? g.inputs : []),
     '-filter_complex', fc, '-map', `[${g ? g.vOut : 'v0'}]`, '-map', `[${g ? g.aOut : 'a0'}]`, '-t', dur.toFixed(2),
-    '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '160k', '-ac', '2', out]);
+    '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '160k', '-ac', '2', '-ar', '48000', out]);
 }
 
 async function concat(parts, out, workDir) {
@@ -44,7 +53,7 @@ async function concat(parts, out, workDir) {
   fs.writeFileSync(list, parts.map((p) => `file '${p.replace(/'/g, "'\\''")}'`).join('\n'));
   // one pass of loudness normalization so the whole video sits at YouTube's -14 LUFS
   await run(FFMPEG, ['-y', '-hide_banner', '-loglevel', 'error', '-f', 'concat', '-safe', '0', '-i', list,
-    '-c:v', 'copy', '-af', 'loudnorm=I=-14:TP=-1.5:LRA=11', '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart', out]);
+    '-c:v', 'copy', '-af', 'loudnorm=I=-14:TP=-1.5:LRA=11,aresample=48000', '-c:a', 'aac', '-b:a', '192k', '-ac', '2', '-ar', '48000', '-movflags', '+faststart', out]);
 }
 
 // horizontal compilation: segments in chronological order, numbered captions
@@ -65,12 +74,20 @@ async function renderCompilation(src, segments, out, workDir, onProgress = () =>
 //   animated emojis in the upper part of the band (never under the like/comment column),
 //   subtitles at the bottom of the band, synced word by word; sound effects mixed under the game audio.
 //   No other text is burned in: the title lives in YouTube's own title field.
-async function renderShort(src, seg, out, workDir, { words = [], accent = '#FFD400', style = 'pop', emoji = '', effects = true } = {}) {
+async function renderShort(src, seg, out, workDir, opts = {}) {
+  try { return await renderShortRaw(src, seg, out, workDir, opts); }
+  catch (e) {
+    if (opts.effects === false && !(opts.words || []).length) throw e;
+    log('Shorts effektlari bilan xato, oddiy variant yig\'ilmoqda: ' + e.message.slice(0, 200), 'warn');
+    return renderShortRaw(src, seg, out, workDir, { ...opts, effects: false, words: [] });
+  }
+}
+async function renderShortRaw(src, seg, out, workDir, { words = [], accent = '#FFD400', style = 'pop', emoji = '', effects = true } = {}) {
   const dur = Math.min(58, seg.end - seg.start);
   const band = SAFE.band.h, bandY = SAFE.band.y;
   let fc = `[0:v]split[a][b];[a]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,boxblur=25:2,eq=brightness=-0.15[bg];` +
     `[b]scale=-2:${band},crop='min(iw,1080)':${band}[fg];[bg][fg]overlay=(W-w)/2:${bandY},fps=${FPS},fade=t=in:st=0:d=0.25[v0];` +
-    `[0:a]aresample=48000,aformat=channel_layouts=stereo[a0]`;
+    `[0:a]aresample=48000,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[a0]`;
   let v = 'v0', a = 'a0', inputs = [];
   if (effects) {
     const events = fx.planEvents({ dur, peakT: (seg.peak ?? seg.start + dur / 2) - seg.start, peakEmoji: emoji || '😱', words,
@@ -84,10 +101,10 @@ async function renderShort(src, seg, out, workDir, { words = [], accent = '#FFD4
     fs.writeFileSync(ass, buildAss(words, dur, { accent, style }));
     fc += `;[${v}]subtitles=filename='${esc(ass)}'${FONT ? `:fontsdir='${esc(path.dirname(FONT))}'` : ''}[vs]`; v = 'vs';
   }
-  fc += `;[${a}]loudnorm=I=-14:TP=-1.5:LRA=11,aresample=48000[aout]`;
+  fc += `;[${a}]loudnorm=I=-14:TP=-1.5:LRA=11,aresample=48000,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[aout]`;
   await run(FFMPEG, ['-y', '-hide_banner', '-loglevel', 'error', '-ss', String(seg.start), '-t', dur.toFixed(2), '-i', src, ...inputs,
     '-filter_complex', fc, '-map', `[${v}]`, '-map', '[aout]', '-t', dur.toFixed(2),
-    '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '160k', '-movflags', '+faststart', out]);
+    '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '160k', '-ac', '2', '-ar', '48000', '-movflags', '+faststart', out]);
 }
 
 // 1280x720 thumbnail: punchy frame, darkened bottom, huge outlined text

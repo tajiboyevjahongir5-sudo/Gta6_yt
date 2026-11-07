@@ -25,6 +25,8 @@ CREATE TABLE IF NOT EXISTS clips (
 CREATE TABLE IF NOT EXISTS stats_daily (day TEXT, clip_id INTEGER, views INTEGER, likes INTEGER, comments INTEGER,
   PRIMARY KEY (day, clip_id));
 CREATE TABLE IF NOT EXISTS channel_daily (day TEXT PRIMARY KEY, subscribers INTEGER, views INTEGER, videos INTEGER);
+CREATE TABLE IF NOT EXISTS channel_videos (id TEXT PRIMARY KEY, title TEXT, thumb TEXT, published INTEGER, views INTEGER, likes INTEGER,
+  comments INTEGER, duration INTEGER, privacy TEXT, updated INTEGER);
 CREATE TABLE IF NOT EXISTS logs (id INTEGER PRIMARY KEY, ts INTEGER, level TEXT, msg TEXT);
 `);
 

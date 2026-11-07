@@ -1,4 +1,5 @@
-FROM node:22-bookworm-slim
+# Debian 13: ffmpeg 7.x (Debian 12 had 5.1, which failed to mix sound-effect audio)
+FROM node:22-trixie-slim
 # ffmpeg = montaj, fonts = prevyu yozuvlari, pil + noto emoji = animatsion emojilar, git = PO token server
 RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg python3 python3-pip python3-pil ca-certificates curl unzip git \
     fonts-dejavu-core fonts-noto-color-emoji && rm -rf /var/lib/apt/lists/*

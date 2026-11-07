@@ -1,5 +1,16 @@
 // Lahza Web App — vanilla JS, no build step.
-const tg = window.Telegram?.WebApp; if (tg) { tg.ready(); tg.expand(); try { tg.setHeaderColor('#0f1012'); tg.setBackgroundColor('#0f1012'); } catch (e) {} }
+const tg = window.Telegram?.WebApp;
+if (tg) {
+  tg.ready(); tg.expand();
+  try { tg.setHeaderColor('#0f1012'); tg.setBackgroundColor('#0f1012'); tg.setBottomBarColor?.('#1a1a19'); } catch (e) {}
+  // full screen on phones (Bot API 8.0+), and scrolling down must not close the app
+  try { if (tg.isVersionAtLeast?.('8.0') && /android|ios/i.test(tg.platform) && !tg.isFullscreen) tg.requestFullscreen(); } catch (e) {}
+  try { tg.disableVerticalSwipes?.(); } catch (e) {}
+}
+// no pinch / double-tap zoom
+for (const ev of ['gesturestart', 'gesturechange']) document.addEventListener(ev, (e) => e.preventDefault(), { passive: false });
+document.addEventListener('touchmove', (e) => { if (e.touches.length > 1) e.preventDefault(); }, { passive: false });
+let lastTap = 0; document.addEventListener('touchend', (e) => { const n = Date.now(); if (n - lastTap < 300 && !e.target.closest('input,textarea,select,video')) e.preventDefault(); lastTap = n; }, { passive: false });
 const $ = (s, r = document) => r.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const nf = new Intl.NumberFormat('uz-UZ');
@@ -19,8 +30,12 @@ async function login(password) {
   token = j.token; localStorage.setItem('lahza_token', token);
 }
 async function api(path, opts = {}) {
-  const r = await fetch(path, { ...opts, headers: { 'content-type': 'application/json', authorization: 'Bearer ' + token, ...(opts.headers || {}) },
-    body: opts.body && typeof opts.body !== 'string' ? JSON.stringify(opts.body) : opts.body });
+  const ctl = new AbortController(); const to = setTimeout(() => ctl.abort(), opts.timeout || 25000);
+  let r;
+  try { r = await fetch(path, { ...opts, signal: ctl.signal, headers: { 'content-type': 'application/json', authorization: 'Bearer ' + token, ...(opts.headers || {}) },
+    body: opts.body && typeof opts.body !== 'string' ? JSON.stringify(opts.body) : opts.body }); }
+  catch (e) { throw new Error(e.name === 'AbortError' ? 'Server javob bermadi, qayta urinib ko\'ring' : 'Internet aloqasi yo\'q'); }
+  finally { clearTimeout(to); }
   if (r.status === 401 && !opts.retried) { try { await login(); return api(path, { ...opts, retried: true }); } catch (e) { showLogin(e.message); throw e; } }
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(j.error || 'Xato ' + r.status);
@@ -34,13 +49,16 @@ function showLogin(msg) {
 const media = (id, kind) => `/media/clip/${id}/${kind}?t=${encodeURIComponent(token)}`;
 
 // ---------- router ----------
-let page = 'home', timer = null;
+let page = 'home', timer = null, busy = false;
 const pages = { home, jobs, clips, stats, sources, settings };
+// every render checks it is still the current page, so a slow answer can't overwrite the page you switched to
+const here = (p) => page === p;
 function go(p) {
-  page = p; clearInterval(timer);
+  page = p; clearInterval(timer); closeSheet();
   document.querySelectorAll('.tabs button').forEach((b) => b.classList.toggle('on', b.dataset.page === p));
   window.scrollTo(0, 0);
-  pages[p]().catch((e) => { if (!/Sessiya|Kirish|Ruxsat/.test(e.message)) $('#view').innerHTML = `<div class="empty">⚠️ ${esc(e.message)}</div>`; });
+  $('#view').innerHTML = '<div class="empty"><span class="spin"></span></div>';
+  pages[p]().catch((e) => { if (here(p) && !/Sessiya|Kirish|Ruxsat/.test(e.message)) $('#view').innerHTML = `<div class="empty">⚠️ ${esc(e.message)}<br><br><button class="btn sm" onclick="go('${p}')">Qayta urinish</button></div>`; });
 }
 $('#tabs').onclick = (e) => { const b = e.target.closest('button'); if (b) { haptic(); go(b.dataset.page); } };
 $('#btnSettings').onclick = () => go('settings');
@@ -52,10 +70,12 @@ const pill = (s) => { const [t, c] = STATUS[s] || [s, '']; return `<span class="
 // ---------- pages ----------
 async function home() {
   const o = await api('/api/overview');
+  if (!here('home')) return;
   $('#chName').textContent = o.channel?.title || 'kanal ulanmagan';
   $('#badgeDrafts').textContent = o.counts.drafts || '';
   const ch = o.channel && !o.channel.error ? o.channel : null;
   const warn = [];
+  if (o.storage && !o.storage.persistent) warn.push('⚠️ <b>Railway Volume ulanmagan</b> — har deployda kanal ulanishi, kalitlar va kliplar o\'chib ketadi. Railway → servis → <b>Volume</b> qo\'shing, mount path: <b>/data</b>');
   const connectCta = !o.youtube.connected ? `<div class="card" style="text-align:center"><div style="font-size:30px">📺</div><b>YouTube kanalingizni ulang</b>
     <p class="muted small">Videolar shu kanalga yuklanadi. Ulanganda kanal uchun nom, username, tavsif, banner va logo tayyorlab beriladi.</p>
     <button class="btn primary" id="cta" style="width:100%">Kanalni ulash</button></div>` : '';
@@ -82,7 +102,7 @@ async function home() {
   $('#vfile').onchange = (e) => uploadVideo(e.target.files[0]);
   if ($('#cta')) $('#cta').onclick = connectYouTube;
   bindCommon();
-  timer = setInterval(() => page === 'home' && !uploading && !$('#url:focus') && home(), 8000);
+  timer = setInterval(() => page === 'home' && !uploading && !busy && !$('#url:focus') && (busy = true, home().finally(() => (busy = false))), 8000);
 }
 // streamed upload with progress (XHR gives upload progress, fetch doesn't)
 let uploading = false;
@@ -119,6 +139,7 @@ const jobCard = (j) => `<div class="card"><div class="row"><div class="grow elli
 
 async function jobs() {
   const list = await api('/api/jobs');
+  if (!here('jobs')) return;
   $('#view').innerHTML = `<h2>Navbat va vazifalar</h2>
     <div class="card"><div class="row"><input type="url" id="url" class="grow" placeholder="Havola qo'shish"><button class="btn primary" id="add">+</button></div></div>
     ${list.length ? list.map(jobCard).join('') : '<div class="empty">Hali video yo\'q. Havola qo\'shing yoki Manbalar bo\'limida kanal kuzating.</div>'}`;
@@ -127,13 +148,14 @@ async function jobs() {
   document.querySelectorAll('[data-del]').forEach((b) => (b.onclick = async () => { if (!confirm('O\'chirilsinmi? (yuklanmagan kliplari ham o\'chadi)')) return;
     try { await api('/api/jobs/' + b.dataset.del, { method: 'DELETE' }); jobs(); } catch (e) { toast(e.message); } }));
   bindCommon();
-  timer = setInterval(() => page === 'jobs' && !$('#url:focus') && jobs(), 5000);
+  timer = setInterval(() => page === 'jobs' && !busy && !$('#url:focus') && (busy = true, jobs().finally(() => (busy = false))), 5000);
 }
 
 let clipFilter = 'draft';
 async function clips() {
   const filters = [['draft', 'Tasdiq kutmoqda'], ['approved,uploading', 'Rejada'], ['published', 'Kanalda'], ['failed,rejected', 'Boshqa']];
   const list = await api('/api/clips?status=' + clipFilter);
+  if (!here('clips')) return;
   $('#view').innerHTML = `<div class="seg">${filters.map(([k, t]) => `<button data-f="${k}" class="${k === clipFilter ? 'on' : ''}">${t}</button>`).join('')}</div>
     ${list.length ? `<div class="clips">${list.map((c) => `<div class="clip ${c.kind}" data-clip="${c.id}"><div class="th" style="background-image:url('${media(c.id, 'thumb')}')"><span>${c.kind === 'short' ? '📱 ' : ''}${dur(c.duration)}</span></div>
       <div class="b"><div class="t">${esc(c.title)}</div><div class="row small muted" style="margin-top:4px">${pill(c.status)}${c.status === 'published' ? `<span class="grow" style="text-align:right">👁 ${num(c.views)}</span>` : c.scheduled_at && c.status === 'approved' ? `<span class="grow ellipsis" style="text-align:right">${when(c.scheduled_at)}</span>` : ''}</div></div></div>`).join('')}</div>`
@@ -226,37 +248,57 @@ function lineChart(el, data, key, label) {
   hit.addEventListener('pointerleave', () => { hideTip(); svg.querySelector('#xh').setAttribute('visibility', 'hidden'); svg.querySelector('#dot').setAttribute('visibility', 'hidden'); });
 }
 
-let statDays = 30;
-async function stats() {
-  const s = await api('/api/stats?days=' + statDays);
-  const total = s.series.reduce((a, d) => a + d.views, 0), uploads = s.series.reduce((a, d) => a + d.uploads, 0);
+let statDays = 30, statSort = 'new';
+const ago2 = (t) => { const sec = Math.round((Date.now() - t) / 1000); return sec < 60 ? `${sec} s oldin` : ago(t); };
+const vdur = (s) => (s ? dur(s) : '');
+async function stats(silent) {
+  const s = await api(`/api/stats?days=${statDays}&sort=${statSort}`);
+  if (!here('stats')) return;
+  const total = s.series.reduce((a, d) => a + d.views, 0);
   const k = Object.fromEntries(s.byKind.map((r) => [r.kind, r]));
   const avg = (r) => (r && r.videos ? Math.round(r.views / r.videos) : 0);
+  const ch = s.channel;
+  const scrollY = window.scrollY;
   $('#view').innerHTML = `
-    <div class="row"><h2 class="grow">Statistika</h2><button class="btn sm" id="refresh">↻ Yangilash</button></div>
-    <div class="seg">${[7, 30, 90].map((d) => `<button data-d="${d}" class="${d === statDays ? 'on' : ''}">${d} kun</button>`).join('')}</div>
+    <div class="row"><h2 class="grow">Statistika</h2><span class="small muted" id="upd">${s.refresh.at ? 'yangilandi ' + ago2(s.refresh.at) : ''}</span><button class="btn sm" id="refresh">↻</button></div>
+    ${!s.connected ? '<div class="warnbox">YouTube kanal ulanmagan — Sozlamalarda ulang</div>' : ''}
+    ${s.refresh.error ? `<div class="warnbox">YouTube'dan olinmadi: ${esc(s.refresh.error)}</div>` : ''}
     <div class="grid">
+      <div class="tile"><div class="v">${ch ? num(ch.subscribers) : '—'}</div><div class="l">Obunachilar</div></div>
+      <div class="tile"><div class="v">${ch ? num(ch.views) : '—'}</div><div class="l">Jami ko'rishlar</div></div>
+      <div class="tile"><div class="v">${ch ? num(ch.videos) : s.videos.length}</div><div class="l">Videolar</div></div>
       <div class="tile"><div class="v">${num(total)}</div><div class="l">Ko'rishlar (${statDays} kun)</div></div>
-      <div class="tile"><div class="v">${uploads}</div><div class="l">Yuklangan videolar</div></div>
     </div>
-    <div class="card"><b>Kunlik ko'rishlar</b><div class="muted small">Barcha yuklangan kliplar bo'yicha</div><div id="c1" style="margin-top:8px"></div></div>
+    <div class="seg">${[7, 30, 90].map((d) => `<button data-d="${d}" class="${d === statDays ? 'on' : ''}">${d} kun</button>`).join('')}</div>
+    <div class="card"><b>Kunlik ko'rishlar</b><div class="muted small">Kanal bo'yicha, kunlik farq</div><div id="c1" style="margin-top:8px"></div></div>
     <div class="card"><b>Obunachilar</b><div id="c2" style="margin-top:8px"></div></div>
-    <h2>Video va Shorts</h2>
     <div class="grid">
-      <div class="tile"><div class="l">🎬 Kompilyatsiyalar</div><div class="v">${num(k.long?.views || 0)}</div><div class="l">${k.long?.videos || 0} ta video · o'rtacha ${num(avg(k.long))}</div></div>
-      <div class="tile"><div class="l">📱 Shorts</div><div class="v">${num(k.short?.views || 0)}</div><div class="l">${k.short?.videos || 0} ta video · o'rtacha ${num(avg(k.short))}</div></div>
+      <div class="tile"><div class="l">🎬 Videolar</div><div class="v">${num(k.long?.views || 0)}</div><div class="l">${k.long?.videos || 0} ta · o'rtacha ${num(avg(k.long))}</div></div>
+      <div class="tile"><div class="l">📱 Shorts</div><div class="v">${num(k.short?.views || 0)}</div><div class="l">${k.short?.videos || 0} ta · o'rtacha ${num(avg(k.short))}</div></div>
     </div>
-    <h2>Eng ko'p ko'rilganlar</h2>
-    <div class="card">${s.top.length ? `<table><tr><th>Video</th><th class="n">👁</th><th class="n">👍</th></tr>${s.top.map((c) => `<tr data-clip="${c.id}"><td><div class="ellipsis" style="max-width:56vw">${c.kind === 'short' ? '📱 ' : ''}${esc(c.title)}</div></td><td class="n">${num(c.views)}</td><td class="n">${num(c.likes)}</td></tr>`).join('')}</table>` : '<div class="muted small">Hali yuklangan video yo\'q</div>'}</div>`;
+    <h2>Kanaldagi barcha videolar (${s.videos.length})</h2>
+    <div class="seg">${[['new', 'Yangi'], ['views', 'Ko\'rishlar'], ['likes', 'Layklar'], ['comments', 'Izohlar']].map(([v, t]) => `<button data-sort="${v}" class="${v === statSort ? 'on' : ''}">${t}</button>`).join('')}</div>
+    <div class="card list">${s.videos.length ? s.videos.map((v) => `<div class="it" data-yt="${esc(v.id)}" data-short="${v.short ? 1 : 0}" style="cursor:pointer">
+      <div style="position:relative;flex:none"><img src="${esc(v.thumb)}" alt="" loading="lazy" style="width:112px;height:63px">${v.duration ? `<span style="position:absolute;right:3px;bottom:3px;background:rgba(0,0,0,.8);font-size:10px;padding:0 4px;border-radius:4px">${vdur(v.duration)}</span>` : ''}</div>
+      <div class="grow" style="min-width:0"><div class="small" style="font-weight:600;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${esc(v.title)}</div>
+        <div class="small muted">👁 ${num(v.views)} · 👍 ${num(v.likes)} · 💬 ${num(v.comments)}</div>
+        <div class="small muted">${new Date(v.published).toLocaleDateString('uz-UZ')}${v.short ? ' · <span class="pill">Shorts</span>' : ''}${v.lahza ? ' · <span class="pill good">Lahza</span>' : ''}${v.privacy && v.privacy !== 'public' ? ` · <span class="pill warn">${v.privacy === 'private' ? 'yopiq' : 'havola orqali'}</span>` : ''}</div></div></div>`).join('')
+      : `<div class="muted small">${s.connected ? (s.refresh.running ? 'YouTube\'dan olinmoqda…' : 'Kanalda hali video yo\'q') : 'Kanal ulanmagan'}</div>`}</div>`;
+  if (silent) window.scrollTo(0, scrollY);
   barChart($('#c1'), s.series, 'views', "ko'rish");
   lineChart($('#c2'), s.subs, 'subscribers', 'obunachi');
   document.querySelectorAll('[data-d]').forEach((b) => (b.onclick = () => { statDays = +b.dataset.d; stats(); }));
-  $('#refresh').onclick = async (e) => { e.target.disabled = true; try { await api('/api/stats/refresh', { method: 'POST' }); await stats(); toast('Yangilandi'); } catch (er) { toast(er.message); e.target.disabled = false; } };
-  bindCommon();
+  document.querySelectorAll('[data-sort]').forEach((b) => (b.onclick = () => { statSort = b.dataset.sort; stats(); }));
+  document.querySelectorAll('[data-yt]').forEach((el) => (el.onclick = () => ext((el.dataset.short === '1' ? 'https://youtube.com/shorts/' : 'https://youtu.be/') + el.dataset.yt)));
+  $('#refresh').onclick = async (e) => { e.target.disabled = true; try { await api('/api/stats/refresh', { method: 'POST', timeout: 60000 }); await stats(true); toast('Yangilandi'); } catch (er) { toast(er.message); e.target.disabled = false; } };
+  // live: re-read every 20 s while this page is open (the server refreshes from YouTube at most once a minute)
+  clearInterval(timer);
+  timer = setInterval(() => { if (here('stats') && !busy && !document.hidden) { busy = true; stats(true).catch(() => {}).finally(() => (busy = false)); } }, 20000);
 }
 
 async function sources() {
   const list = await api('/api/sources');
+  if (!here('sources')) return;
   $('#view').innerHTML = `<h2>Kuzatiladigan kanallar</h2>
     <div class="card">
       <label class="f">Kanal havolasi</label><input type="url" id="su" placeholder="https://www.youtube.com/@streamer yoki twitch.tv/streamer">
@@ -289,6 +331,7 @@ async function sources() {
 async function settings() {
   document.querySelectorAll('.tabs button').forEach((b) => b.classList.remove('on'));
   const [s, o] = await Promise.all([api('/api/settings'), api('/api/overview')]);
+  if (!here('settings')) return;
   const sw = (k, t, hint = '') => `<div class="switch"><div><div>${t}</div>${hint ? `<div class="muted small">${hint}</div>` : ''}</div><input type="checkbox" data-k="${k}" ${s[k] ? 'checked' : ''}></div>`;
   const inp = (k, t, type = 'text', extra = '') => `<label class="f">${t}</label><input type="${type}" data-k="${k}" value="${esc(Array.isArray(s[k]) ? s[k].join(', ') : s[k])}" ${extra}>`;
   $('#view').innerHTML = `<h2>YouTube kanal</h2>

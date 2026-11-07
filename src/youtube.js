@@ -151,4 +151,31 @@ async function applyBranding({ description, keywords, bannerFile }) {
   return ch.id;
 }
 
-module.exports = { setCreds, setupInfo, canBrand, applyBranding, configured, connected, authUrl, checkState, finishAuth, disconnect, channelInfo, upload, setThumbnail, videoStats, fitTags };
+// every video on the connected channel with its live statistics (uploads playlist → videos.list, ~1 quota unit per 50 videos)
+const isoSec = (d) => { const m = String(d || '').match(/P(?:(\d+)D)?T?(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/) || [];
+  return (+m[1] || 0) * 86400 + (+m[2] || 0) * 3600 + (+m[3] || 0) * 60 + (+m[4] || 0); };
+async function channelVideos(max = 500) {
+  const ch = await api('channels?part=contentDetails,statistics,snippet&mine=true');
+  const c = ch.items?.[0]; const up = c?.contentDetails?.relatedPlaylists?.uploads;
+  if (!up) return { channel: null, videos: [] };
+  const ids = []; let page = '';
+  do {
+    const j = await api(`playlistItems?part=contentDetails&maxResults=50&playlistId=${up}${page ? '&pageToken=' + page : ''}`);
+    for (const it of j.items || []) ids.push(it.contentDetails.videoId);
+    page = j.nextPageToken;
+  } while (page && ids.length < max);
+  const videos = [];
+  for (let i = 0; i < ids.length; i += 50) {
+    const j = await api('videos?part=snippet,statistics,contentDetails,status&id=' + ids.slice(i, i + 50).join(','));
+    for (const v of j.items || []) videos.push({ id: v.id, title: v.snippet.title,
+      thumb: v.snippet.thumbnails?.medium?.url || v.snippet.thumbnails?.default?.url || '', published: Date.parse(v.snippet.publishedAt),
+      views: +(v.statistics.viewCount || 0), likes: +(v.statistics.likeCount || 0), comments: +(v.statistics.commentCount || 0),
+      duration: isoSec(v.contentDetails.duration), privacy: v.status?.privacyStatus || '' });
+  }
+  const channel = { id: c.id, title: c.snippet.title, thumb: c.snippet.thumbnails?.default?.url, subscribers: +(c.statistics.subscriberCount || 0),
+    views: +(c.statistics.viewCount || 0), videos: +(c.statistics.videoCount || 0), at: Date.now() };
+  setSecret('channel', channel);
+  return { channel, videos };
+}
+
+module.exports = { channelVideos, setCreds, setupInfo, canBrand, applyBranding, configured, connected, authUrl, checkState, finishAuth, disconnect, channelInfo, upload, setThumbnail, videoStats, fitTags };
