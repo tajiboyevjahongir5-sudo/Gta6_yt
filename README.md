@@ -17,11 +17,26 @@ Havola / kuzatilgan kanal ─► yuklab olish (yt-dlp) ─► tahlil: ovoz + har
 | **Lahza qidirish** | Har soniyaning ovoz balandligi (qichqiriq, kulgi, portlash) va sahna o'zgarishlari (quvish, avariya) bo'yicha ball. 6 soatlik efir ham bir necha daqiqada tahlil qilinadi |
 | **AI** (ixtiyoriy) | Claude har bir nomzod lahzadan kadrlarni ko'rib 0–10 baho beradi (menyu, yuklanish ekrani, AFK — past ball), izoh, nom, tavsif, 12–20 teg va prevyu yozuvini yozadi. Til: o'zbek / rus / ingliz |
 | **Montaj** | 16:9 kompilyatsiya (raqamlangan lahzalar, silliq o'tishlar, ovoz −14 LUFS ga tenglashtiriladi), 9:16 Shorts (xira fon, kattalashtirilgan o'yin, katta sarlavha) |
+| **Subtitr** (Shorts) | Nutq so'zma-so'z yoziladi (faster-whisper, o'zbek/rus/ingliz), aytilayotgan so'z sariq bo'lib ajralib turadi. Joylashuvi YouTube interfeysiga moslangan — pastga qarang |
 | **Prevyu** | 1280×720, eng kuchli kadr, to'yingan ranglar, katta qalin yozuv, "GTA 6" belgisi. Panelda yozuvni o'zgartirib qayta chizish mumkin |
 | **Tavsif** | AI matni + avtomatik taym-kodlar (YouTube bo'limlari) + original stream muallifi havolasi + sizning doimiy oxiringiz |
 | **Nashr** | Tasdiqlab yoki avto-rejimda; belgilangan vaqtlarda (masalan 13:00 va 19:00), kunlik limit bilan |
 | **Manbalar** | YouTube / Twitch / Kick kanallarini kuzatadi: efir tugab yozuvi chiqqach (sarlavhada "GTA" bo'lsa, 30+ daqiqa) o'zi navbatga qo'yadi |
 | **Statistika** | Obunachilar, kunlik ko'rishlar, Video vs Shorts, eng ko'p ko'rilganlar |
+
+### Shorts maketi va xavfsiz zona
+YouTube Shorts ekranining bir qismini o'z tugmalari bilan yopadi. Manbalar har xil raqam beradi, shuning uchun eng ehtiyotkor
+qiymatlar olingan (1080×1920 kadrda, `src/subtitles.js` → `SAFE`):
+
+| Zona | Nima turadi | Chegara |
+|---|---|---|
+| Pastki 672px | kanal nomi, Obuna, nom/tavsif, musiqa | subtitr shundan **yuqorida** tugaydi |
+| O'ng 192px | layk, dizlayk, koment, ulashish, remiks | subtitr va sarlavha shundan **chapda**, bo'sh joy markazida (x≈468) |
+| Yuqori 288px | qidiruv, menyu | sarlavha shundan **pastda** boshlanadi |
+
+Tartib: sarlavha (tepada) → o'yin kadri (o'rtada, kattalashtirilgan) → subtitr (pastda, tavsif ustida).
+Panel → Kliplar → Shorts → **"📐 YouTube interfeysini ko'rsatish"** — tasdiqlashdan oldin tugmalar va tavsif qayerga tushishini
+video ustida ko'rasiz.
 
 ### Web App sahifalari
 - **Asosiy** — kanal ko'rsatkichlari, havola qo'shish, hozir ishlanayotganlar, keyingi yuklashlar, hodisalar
@@ -47,7 +62,7 @@ cp .env.example .env   # va to'ldiring (pastda)
 docker compose up -d --build
 ```
 HTTPS kerak (Telegram Web App va Google buni talab qiladi): domen + Caddy/Nginx yoki Cloudflare Tunnel.
-Docker'siz: Node 22.13+, `ffmpeg`, `yt-dlp` o'rnating, keyin `npm install && npm start`.
+Docker'siz: Node 22.13+, `ffmpeg`, `yt-dlp`, subtitr uchun `pip install faster-whisper` o'rnating, keyin `npm install && npm start`.
 
 ### 2. Telegram bot
 1. @BotFather → `/newbot` → tokenni `BOT_TOKEN` ga yozing.
@@ -100,6 +115,6 @@ Ma'lumotlar `DATA_DIR` da: `lahza.db`, `work/` (vaqtinchalik), `out/` (tayyor kl
 
 ## Keyingi qadamlar (g'oyalar)
 - Twitch chat faolligi bo'yicha lahza topish (chat "LUL/KEKW" bilan portlagan joylar — eng aniq signal)
-- Whisper bilan subtitr (Shorts'da so'zma-so'z yozuv ko'rishlarni sezilarli oshiradi)
+- Subtitr matnini AI bilan tuzatish (Whisper o'zbek tilida ba'zan adashadi)
 - Bir nechta kanal (o'zbekcha va ruscha) va TikTok / Instagram Reels'ga ham yuklash
 - Prevyu A/B test (YouTube "Test & Compare")

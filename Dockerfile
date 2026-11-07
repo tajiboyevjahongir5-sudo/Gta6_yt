@@ -6,6 +6,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg python3 
 WORKDIR /app
 COPY package*.json ./
 RUN npm install --omit=dev --no-audit --no-fund
+# Shorts subtitles: faster-whisper, model downloaded once at build time (WHISPER_MODEL must match the setting)
+ARG WHISPER_MODEL=small
+RUN apt-get update && apt-get install -y --no-install-recommends python3-pip && rm -rf /var/lib/apt/lists/* \
+ && pip3 install --no-cache-dir --break-system-packages faster-whisper \
+ && python3 -c "from faster_whisper import WhisperModel; WhisperModel('${WHISPER_MODEL}', device='cpu', compute_type='int8')"
 COPY . .
 ENV DATA_DIR=/data NODE_ENV=production
 VOLUME /data

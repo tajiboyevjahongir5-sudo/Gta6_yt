@@ -48,6 +48,9 @@ const DEFAULTS = {
   accent: '#FFD400',           // thumbnail text colour
   keepSource: false,           // delete downloaded stream after rendering
   useAI: true,
+  subtitles: true,             // word-by-word captions on Shorts (needs python3 + faster-whisper)
+  whisperModel: 'small',       // tiny | base | small | medium (bigger = more accurate, slower)
+  subtitleLang: 'auto',        // auto | uz | ru | en
 };
 function getSettings() {
   const s = { ...DEFAULTS };

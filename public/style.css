@@ -57,3 +57,13 @@ table{width:100%;border-collapse:collapse;font-size:13px}td,th{padding:7px 4px;b
 .empty{color:var(--muted);text-align:center;padding:30px 10px}
 .warnbox{background:rgba(227,160,8,.1);border:1px solid rgba(227,160,8,.35);color:#f5c451;border-radius:12px;padding:10px 12px;font-size:13px;margin-bottom:10px}
 .chips{display:flex;flex-wrap:wrap;gap:6px}.chips span{background:var(--s2);border-radius:8px;padding:3px 8px;font-size:12px}
+
+/* Shorts preview with the YouTube UI overlay: zones match SAFE in src/subtitles.js (1080x1920) */
+.phone{position:relative;aspect-ratio:9/16;max-height:62vh;margin:0 auto;border-radius:14px;overflow:hidden;background:#000}
+.phone video{width:100%;height:100%;max-height:none;object-fit:contain;border-radius:0}
+.phone .ui{position:absolute;inset:0;pointer-events:none;font-size:2.4vh;color:#fff;text-shadow:0 1px 3px #000}
+.phone .z{position:absolute;background:rgba(229,72,77,.32);outline:1px dashed rgba(255,139,142,.8)}
+.phone .z.top{left:0;right:0;top:0;height:15%}.phone .z.bottom{left:0;right:0;bottom:0;height:35%}
+.phone .z.right{right:0;top:15%;height:50%;width:17.78%}
+.phone .btns{position:absolute;right:4%;bottom:37%;text-align:center;line-height:2.1}
+.phone .desc{position:absolute;left:4%;right:20%;bottom:20%;font-size:1.7vh;line-height:1.5}

@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const { run, fmtTime } = require('./util');
 const { FFMPEG, FONT } = require('./config');
+const { SAFE, buildAss } = require('./subtitles');
 
 const FPS = 30;
 // ffmpeg filter-graph escaping for values like a font path
@@ -53,15 +54,24 @@ async function renderCompilation(src, segments, out, workDir, onProgress = () =>
   onProgress(1);
 }
 
-// vertical Short: blurred full-screen background + the gameplay centered + big title on top
-async function renderShort(src, seg, title, out, workDir) {
+// vertical Short, laid out around the YouTube Shorts UI (see SAFE in subtitles.js):
+//   title      -> top of the safe box, centered in the free area (left of the like/comment column)
+//   gameplay   -> full-width band in the middle, zoomed in (sides cropped)
+//   subtitles  -> bottom of the safe box, just above the channel name / description
+async function renderShort(src, seg, title, out, workDir, { words = [], accent = '#FFD400' } = {}) {
   const dur = Math.min(58, seg.end - seg.start);
-  const tf = textFile(workDir, path.basename(out) + '.txt', wrap(title, 18, 3));
-  const fc = `[0:v]split[a][b];[a]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,boxblur=25:2,eq=brightness=-0.12[bg];` +
-    // gameplay zoomed in (sides cropped) so it fills ~half of the phone screen
-    `[b]scale=-2:880,crop='min(iw,1080)':880[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2+60,fps=${FPS},` +
-    `drawtext=${fontOpt()}textfile='${esc(tf)}':fontsize=78:line_spacing=10:fontcolor=white:borderw=6:bordercolor=black:x=(w-text_w)/2:y=230,` +
-    `fade=t=in:st=0:d=0.25[v]`;
+  const tf = textFile(workDir, path.basename(out) + '.txt', wrap(title, 17, 3));
+  const band = 760, bandY = 540; // 540..1300: under the title, behind the subtitles
+  let fc = `[0:v]split[a][b];[a]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,boxblur=25:2,eq=brightness=-0.15[bg];` +
+    `[b]scale=-2:${band},crop='min(iw,1080)':${band}[fg];[bg][fg]overlay=(W-w)/2:${bandY},fps=${FPS},` +
+    `drawtext=${fontOpt()}textfile='${esc(tf)}':fontsize=68:line_spacing=8:fontcolor=white:borderw=6:bordercolor=black:` +
+    `x=${SAFE.x0}+(${SAFE.x1 - SAFE.x0}-text_w)/2:y=${SAFE.y0 + 12},fade=t=in:st=0:d=0.25`;
+  if (words.length) {
+    const ass = path.join(workDir, path.basename(out) + '.ass');
+    fs.writeFileSync(ass, buildAss(words, dur, { accent }));
+    fc += `,subtitles=filename='${esc(ass)}'${FONT ? `:fontsdir='${esc(path.dirname(FONT))}'` : ''}`;
+  }
+  fc += '[v]';
   await run(FFMPEG, ['-y', '-hide_banner', '-loglevel', 'error', '-ss', String(seg.start), '-t', dur.toFixed(2), '-i', src,
     '-filter_complex', fc, '-map', '[v]', '-map', '0:a?', '-af', 'loudnorm=I=-14:TP=-1.5:LRA=11,aresample=48000',
     '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '160k', '-movflags', '+faststart', out]);

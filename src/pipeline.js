@@ -6,6 +6,7 @@ const { WORK_DIR, OUT_DIR, YTDLP } = require('./config');
 const { run, sleep, fmtTime, dayKey, TZ_OFFSET } = require('./util');
 const { findHighlights } = require('./analyze');
 const render = require('./render');
+const subs = require('./subtitles');
 const ai = require('./ai');
 const yt = require('./youtube');
 const tg = require('./telegram');
@@ -120,7 +121,8 @@ async function processJob(job) {
     for (let i = 0; i < Math.min(settings.shortsPerVideo, picked.length); i++) {
       const s = picked[i]; const title = s.shortTitle || tpl.shortTitle(i);
       const out = path.join(outDir, `short_${i + 1}.mp4`); const thumb = path.join(outDir, `short_${i + 1}.jpg`);
-      await render.renderShort(src, s, title, out, dir);
+      const words = settings.subtitles ? await subs.transcribe(src, s.start, Math.min(58, s.end - s.start), dir, { model: settings.whisperModel, lang: settings.subtitleLang }) : [];
+      await render.renderShort(src, s, title, out, dir, { words, accent: settings.accent });
       await render.grabFrame(out, 1.5, thumb, 540);
       const description = [title, '', creditLine(job), '', `#shorts #${settings.game.replace(/\s+/g, '')} #gaming`].join('\n');
       const r = ins.run(job.id, 'short', out, thumb, JSON.stringify([s]), Math.min(58, s.end - s.start), s.final,
