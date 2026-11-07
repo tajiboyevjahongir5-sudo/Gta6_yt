@@ -35,10 +35,18 @@ async function transcribe(src, start, dur, workDir, { model = 'large-v3-turbo', 
     await run(FFMPEG, ['-y', '-hide_banner', '-loglevel', 'error', '-ss', String(start), '-t', String(dur), '-i', src, '-vn',
       // select: jump-cut Shorts - transcribe exactly the kept parts, so word times match the edited video
       '-af', (select ? `aselect='${select}',asetpts=N/SR/TB,` : '') + 'highpass=f=90,lowpass=f=7500,afftdn=nf=-25,dynaudnorm=f=150:g=15', '-ac', '1', '-ar', '16000', wav]);
-    const asr = async (extra = []) => JSON.parse((await run(PY, [SCRIPT, wav, '--model', model, '--lang', lang, '--context', hint, ...extra],
+    // Whisper often hears Uzbek as Turkish/Kazakh: when the channel is Uzbek and the speaker language is "auto",
+    // tell it the language instead of letting it guess
+    const spoken = lang !== 'auto' ? lang : (to === 'uz' ? 'uz' : 'auto');
+    const asr = async (extra = []) => JSON.parse((await run(PY, [SCRIPT, wav, '--model', model, '--lang', spoken, '--context', hint, ...extra],
       { timeoutMs: 20 * 60000 })).out);
     let j = await asr();
+    if (to === 'uz' && ['tr', 'kk', 'az', 'ky', 'tk', 'tg', 'ba', 'tt'].includes(j.language)) j.language = 'uz';
     let words = (j.words || []).filter((w) => w.end > 0 && w.start < dur);
+    // Gemini listens to the whole clip and writes ALL the speech (Whisper misses and mishears a lot in Uzbek);
+    // Whisper's word starts only sharpen the timing
+    const full = await geminiSubtitles(wav, words, to || j.language, context, dur);
+    if (full) return lead(full);
     if (!words.length) return words;
     // the AI listens to the clip and fixes (same language) or translates each phrase; Whisper keeps the timing
     const fixed = await translateWords(words, j.language, to || j.language, context, wav);
@@ -57,6 +65,51 @@ async function transcribe(src, start, dur, workDir, { model = 'large-v3-turbo', 
 
 // subtitles appear a hair before the voice (Whisper marks word starts a bit late; editors lead by ~0.15 s)
 const lead = (ws, by = 0.15) => ws.map((w) => ({ ...w, start: Math.max(0, +(w.start - by).toFixed(2)), end: Math.max(0.05, +(w.end - by).toFixed(2)) }));
+
+// Gemini transcribes (or translates) the clip into short timed phrases; phrase starts snap to Whisper's word starts
+async function geminiSubtitles(wav, words, to, context, dur) {
+  const ai = require('./ai');
+  if (!ai.providers().includes('gemini') || !fs.existsSync(wav)) return null;
+  const target = to === 'uz' ? 'Uzbek in LATIN script (o\' g\' sh ch; never Cyrillic, never Turkish spelling)' : (LANG_NAMES[to] || to);
+  const r = await ai.generateJSON({
+    schema: { type: 'object', additionalProperties: false, required: ['phrases'], properties: { phrases: { type: 'array', items: {
+      type: 'object', additionalProperties: false, required: ['start', 'end', 'text'],
+      properties: { start: { type: 'number' }, end: { type: 'number' }, text: { type: 'string' } } } } } },
+    maxTokens: 6000,
+    parts: [{ text: 'Audio of a gaming video clip:' }, { audio: wav }, { text:
+      `Write subtitles for ALL the speech in this ${dur.toFixed(0)}-second audio (do not skip anything, including short shouts and laughs with words).` +
+      ` Video: "${context.title || ''}"${context.subject ? ` (${context.subject})` : ''}.\n` +
+      `Output language: ${target}. If the speaker uses another language, translate naturally; keep slang, tone and emotion.\n` +
+      `Split into short subtitle phrases (max 5 words, max ~2.5 s each). start/end = seconds from the start of THIS audio, with decimals, as precise as you can.\n` +
+      `No speaker names, no sound descriptions, no quotes.` }],
+  });
+  let ph = (r?.data?.phrases || []).filter((p) => p && p.text && String(p.text).trim() && p.end > p.start && p.start < dur + 1)
+    .map((p) => ({ start: Math.max(0, +p.start), end: Math.min(dur, +p.end), text: String(p.text).replace(/\s+/g, ' ').trim() }))
+    .sort((a, b) => a.start - b.start);
+  if (!ph.length) return null;
+  // snap each phrase start to the nearest real word start (±0.8 s), never before the previous phrase
+  const starts = words.map((w) => w.start);
+  let prevEnd = 0;
+  ph = ph.map((p, i) => {
+    let st = p.start;
+    const near = starts.filter((t) => Math.abs(t - st) <= 0.8).sort((a, b) => Math.abs(a - st) - Math.abs(b - st))[0];
+    if (near !== undefined) st = near;
+    st = Math.max(st, prevEnd);
+    const next = ph[i + 1] ? ph[i + 1].start : dur;
+    const en = Math.max(st + 0.4, Math.min(p.end + (near !== undefined ? near - p.start : 0), next, dur));
+    prevEnd = en;
+    return { ...p, start: st, end: en };
+  });
+  // phrase -> words, time shared by word length
+  const out = [];
+  for (const p of ph) {
+    const toks = p.text.split(' ').filter(Boolean); const total = toks.reduce((a, w) => a + w.length + 1, 0);
+    let t = p.start;
+    for (const w of toks) { const d = ((p.end - p.start) * (w.length + 1)) / total; out.push({ word: w, start: +t.toFixed(2), end: +(t + d).toFixed(2) }); t += d; }
+  }
+  log(`Subtitr: Gemini ${ph.length} ta ibora yozdi`);
+  return out;
+}
 
 const LANG_NAMES = { en: 'English', ru: 'Russian', uz: 'Uzbek', tr: 'Turkish', kk: 'Kazakh', ky: 'Kyrgyz', tg: 'Tajik', de: 'German', es: 'Spanish' };
 async function translateWords(words, from, to, context, audio = null) {
@@ -183,4 +236,4 @@ async function detectFacecam(src) {
   catch (e) { log('Webkamera aniqlanmadi: ' + e.message.slice(0, 200), 'warn'); return null; }
 }
 
-module.exports = { translateWords, detectFacecam, SAFE, transcribe, buildAss, phrases, fontFamily };
+module.exports = { geminiSubtitles, translateWords, detectFacecam, SAFE, transcribe, buildAss, phrases, fontFamily };

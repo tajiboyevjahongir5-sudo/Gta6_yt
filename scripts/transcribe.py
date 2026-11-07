@@ -39,10 +39,10 @@ if a.to == "en" and info.language != "en":
     task = "translate"
 words = []
 for seg in segments:
-    if seg.no_speech_prob > 0.6:
+    if seg.no_speech_prob > 0.85:
         continue
     for w in seg.words or []:
         t = w.word.strip()
-        if t and w.probability > 0.2:
+        if t and w.probability > 0.02:
             words.append({"start": round(w.start, 2), "end": round(w.end, 2), "word": t})
 json.dump({"language": info.language, "task": task, "words": words}, sys.stdout, ensure_ascii=False)

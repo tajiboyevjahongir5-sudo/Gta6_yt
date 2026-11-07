@@ -46,7 +46,7 @@ function toGeminiSchema(js) {
   return out;
 }
 // model ids change over time: try the configured one, then the "latest" alias, then known stable ones
-const GEMINI_MODELS = () => [...new Set([GEMINI_MODEL, 'gemini-flash-latest', 'gemini-2.5-flash', 'gemini-2.0-flash'].filter(Boolean))];
+const GEMINI_MODELS = () => [...new Set([GEMINI_MODEL, 'gemini-flash-latest', 'gemini-2.5-flash', 'gemini-flash-lite-latest', 'gemini-2.0-flash'].filter(Boolean))];
 let geminiWorking = null;
 // youtube: { url, fps } — Gemini watches a public YouTube video itself (picture + sound), no download needed
 async function callGemini({ parts, schema, youtube }) {
@@ -60,22 +60,35 @@ async function callGemini({ parts, schema, youtube }) {
       ...(withVideo && youtube ? { mediaResolution: 'MEDIA_RESOLUTION_LOW' } : {}) },
   });
   let lastErr;
+  const busy = (st) => st === 503 || st === 500 || st === 502 || st === 504;
   for (const withVideo of youtube ? [true, false] : [false]) {
-    for (const model of geminiWorking ? [geminiWorking] : GEMINI_MODELS()) {
-      const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
-        method: 'POST', headers: { 'content-type': 'application/json', 'x-goog-api-key': key }, body: JSON.stringify(build(withVideo)) });
-      const j = await r.json().catch(() => ({}));
-      if (r.ok) {
-        geminiWorking = model;
-        const text = (j.candidates?.[0]?.content?.parts || []).map((x) => x.text || '').join('');
-        if (!text) { lastErr = new Error('Gemini bo\'sh javob qaytardi (' + (j.candidates?.[0]?.finishReason || j.promptFeedback?.blockReason || '?') + ')'); break; }
-        if (withVideo) log(`Gemini videoni to'liq ko'rdi (${model})`);
-        return JSON.parse(text.replace(/^```(?:json)?\s*|\s*```$/g, ''));
+    // a busy/unknown model -> the next one; when the "working" model is busy, the others get a chance too
+    const models = geminiWorking ? [geminiWorking, ...GEMINI_MODELS().filter((m) => m !== geminiWorking)] : GEMINI_MODELS();
+    let videoRefused = false;
+    for (const model of models) {
+      // Google's "high demand" 503s and dropped connections are short-lived: wait and retry (2 s, 5 s, 10 s)
+      for (let attempt = 0; attempt < 4; attempt++) {
+        if (attempt) await new Promise((res) => setTimeout(res, [0, 2000, 5000, 10000][attempt]));
+        let r, j;
+        try {
+          r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+            method: 'POST', headers: { 'content-type': 'application/json', 'x-goog-api-key': key }, body: JSON.stringify(build(withVideo)) });
+          j = await r.json().catch(() => ({}));
+        } catch (e) { lastErr = new Error('Gemini bilan aloqa uzildi: ' + e.message); continue; }
+        if (r.ok) {
+          geminiWorking = model;
+          const text = (j.candidates?.[0]?.content?.parts || []).map((x) => x.text || '').join('');
+          if (!text) { lastErr = new Error('Gemini bo\'sh javob qaytardi (' + (j.candidates?.[0]?.finishReason || j.promptFeedback?.blockReason || '?') + ')'); break; }
+          if (withVideo) log(`Gemini videoni to'liq ko'rdi (${model})`);
+          return JSON.parse(text.replace(/^```(?:json)?\s*|\s*```$/g, ''));
+        }
+        lastErr = new Error(`Gemini ${r.status}: ${j.error?.message || ''}`.slice(0, 300));
+        if (r.status === 429) { lastErr.quota = true; throw lastErr; } // free daily/minute limit reached
+        if (busy(r.status)) continue;                                   // retry the same model after a pause
+        if (r.status !== 404) videoRefused = true;                      // e.g. video not public/too long
+        break;                                                          // 404 (unknown model) or refused: next model / no video
       }
-      lastErr = new Error(`Gemini ${r.status}: ${j.error?.message || ''}`.slice(0, 300));
-      if (r.status === 429) { lastErr.quota = true; throw lastErr; } // free daily/minute limit reached
-      if (r.status === 404) continue;                                // unknown model id: try the next one
-      break;                                                          // e.g. video not public/too long: retry without the video
+      if (videoRefused) break;
     }
   }
   throw lastErr;
