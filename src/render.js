@@ -74,7 +74,7 @@ async function cutSegmentRaw(src, seg, out, { width = 1920, height = 1080, label
     (g && g.filter ? ';' + g.filter : '');
   await run(FFMPEG, ['-y', '-hide_banner', '-loglevel', 'error', '-ss', String(seg.start), '-t', dur.toFixed(2), '-i', src, ...au.inputs, ...(g ? g.inputs : []),
     '-filter_complex', fc, '-map', `[${g ? g.vOut : 'v0'}]`, '-map', `[${g ? g.aOut : 'a0'}]`, '-t', dur.toFixed(2),
-    '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '160k', '-ac', '2', '-ar', '48000', out]);
+    '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-maxrate', '16M', '-bufsize', '32M', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '160k', '-ac', '2', '-ar', '48000', out]);
 }
 
 async function concat(parts, out, workDir) {
@@ -114,7 +114,7 @@ async function renderOutro(lastPart, out, workDir, { channel = '', topic = '', l
   fc += `;[${ai}:a]anull[an]` + (g.filter ? ';' + g.filter : '') +
     `;[${g.vOut}]fade=t=in:st=0:d=0.4,fade=t=out:st=${D - 0.8}:d=0.8,fps=${FPS},format=yuv420p[vo];[${g.aOut}]afade=t=out:st=${D - 0.8}:d=0.8[ao]`;
   await run(FFMPEG, ['-y', '-hide_banner', '-loglevel', 'error', ...inputs, ...g.inputs, '-filter_complex', fc, '-map', '[vo]', '-map', '[ao]', '-t', String(D),
-    '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '160k', '-ac', '2', '-ar', '48000', out]);
+    '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-maxrate', '16M', '-bufsize', '32M', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '160k', '-ac', '2', '-ar', '48000', out]);
 }
 
 // horizontal compilation: segments in chronological order, numbered captions
@@ -167,30 +167,73 @@ function facecamCrops(fc) {
   return { cam: { w: even(cw), h: even(ch), x: even(cx), y: even(cy) }, game: { w: even(gw), h: even(fc.height), x: even(gx) } };
 }
 
+// select expression for jump-cut "story" Shorts: parts are [{start,end}] relative to the input start
+const partsExpr = (parts) => parts.map((p) => `between(t,${p.start.toFixed(2)},${p.end.toFixed(2)})`).join('+');
+
 async function renderShortRaw(src, seg, out, workDir, { words = [], accent = '#FFD400', style = 'pop', emoji = '', effects = true, emojis = false,
-  facecam = null, zoom = true, endCard = null } = {}) {
-  const dur = Math.min(58, seg.end - seg.start);
-  const peakT = Math.max(0.5, Math.min(dur - 2.2, (seg.peak ?? seg.start + dur / 2) - seg.start));
+  facecam = null, zoom = true, endCard = null, meme = '' } = {}) {
+  const parts = seg.parts && seg.parts.length ? seg.parts : null;
+  const span = seg.end - seg.start;                              // input length read from the source
+  const dur = parts ? Math.min(60, parts.reduce((t, p) => t + p.end - p.start, 0)) : Math.min(58, span);
+  const peakT = Math.max(0.5, Math.min(dur - 2.2, seg.peakOut ?? ((seg.peak ?? seg.start + dur / 2) - seg.start)));
   const zf = (w, h) => (effects && zoom ? `,${zoomFilter(peakT, w, h)}` : '');
   const band = SAFE.band.h, bandY = SAFE.band.y;
+  // jump cuts: keep only the parts, then renumber timestamps (hard cuts, like a human editor)
+  const vsel = parts ? `select='${partsExpr(parts)}',setpts=N/${FPS}/TB,` : '';
+  // climax: webcam disappears, the gameplay takes the whole screen for a moment
+  const climax = facecam && effects ? { a: Math.max(0, peakT - 1.5), b: Math.min(dur - 0.5, peakT + 2.6) } : null;
   let fc;
   let emojiArea = { x: 70, y: bandY + 30, w: 800, h: 560, size: 300 };
   if (facecam) {
     // streamer layout (like popular gaming Shorts): webcam on top, a thin accent line, gameplay filling the rest
     const c = facecamCrops(facecam);
-    fc = `[0:v]fps=${FPS},split[a][b];[a]crop=${c.cam.w}:${c.cam.h}:${c.cam.x}:${c.cam.y},scale=1080:${CAM_H}:flags=lanczos,setsar=1[cam];` +
+    fc = `[0:v]fps=${FPS},${vsel}split=${climax ? 3 : 2}[a][b]${climax ? '[f]' : ''};[a]crop=${c.cam.w}:${c.cam.h}:${c.cam.x}:${c.cam.y},scale=1080:${CAM_H}:flags=lanczos,setsar=1[cam];` +
       `[b]crop=${c.game.w}:${c.game.h}:${c.game.x}:0,scale=1080:${GAME_H}:flags=lanczos,setsar=1${zf(1080, GAME_H)}[game];` +
-      `[cam][game]vstack,drawbox=x=0:y=${CAM_H - 4}:w=1080:h=8:color=${accent.replace('#', '0x')}:t=fill,fps=${FPS},fade=t=in:st=0:d=0.25[v0];`;
+      `[cam][game]vstack,drawbox=x=0:y=${CAM_H - 4}:w=1080:h=8:color=${accent.replace('#', '0x')}:t=fill[stack];`;
+    if (climax) {
+      const fw = Math.round(Math.min(facecam.width, facecam.height * 9 / 16) / 2) * 2, camMid = facecam.x + facecam.w / 2;
+      let fx = (facecam.width - fw) / 2;
+      if (camMid > facecam.width * 0.6) fx = Math.max(0, Math.min(fx, facecam.x - fw)); else if (camMid < facecam.width * 0.4) fx = Math.min(facecam.width - fw, Math.max(fx, facecam.x + facecam.w));
+      fc += `[f]crop=${fw}:${facecam.height}:${Math.round(fx / 2) * 2}:0,scale=1080:1920:flags=lanczos,setsar=1${zf(1080, 1920)}[full];` +
+        `[stack][full]overlay=0:0:enable='between(t,${climax.a.toFixed(2)},${climax.b.toFixed(2)})'[st2];`;
+    }
+    fc += `[${climax ? 'st2' : 'stack'}]fps=${FPS},fade=t=in:st=0:d=0.25[v0];`;
     emojiArea = { x: 70, y: CAM_H + 40, w: 800, h: 520, size: 300 };
   } else {
-    fc = `[0:v]fps=${FPS},split[a][b];[a]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,boxblur=25:2,eq=brightness=-0.15[bg];` +
+    fc = `[0:v]fps=${FPS},${vsel}split[a][b];[a]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,boxblur=25:2,eq=brightness=-0.15[bg];` +
       `[b]scale=-2:${band},crop=1080:${band}${zf(1080, band)}[fg];[bg][fg]overlay=(W-w)/2:${bandY}:shortest=1,fps=${FPS},fade=t=in:st=0:d=0.25[v0];`;
   }
-  const au = await audioSource(src, dur);
-  fc += `[${au.label}]aresample=48000,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[a0]`;
+  // meme caption at the climax, typed word by word (big white letters, black outline), like editors do
+  if (meme && effects) {
+    const ws = String(meme).trim().split(/\s+/).slice(0, 7); const t0 = peakT + 0.15, t1 = Math.min(dur - 0.2, peakT + 3.6);
+    const lines = []; let cur = '';
+    for (const w of ws) { if ((cur + ' ' + w).trim().length > 16 && cur) { lines.push(cur); cur = w; } else cur = (cur + ' ' + w).trim(); }
+    if (cur) lines.push(cur);
+    let shown = 0; const steps = [];
+    for (let li = 0; li < lines.length; li++) { const lw = lines[li].split(' '); for (let k = 1; k <= lw.length; k++) steps.push({ li, text: lw.slice(0, k).join(' ') }); }
+    const dt = Math.min(0.28, (t1 - t0 - 0.8) / Math.max(1, steps.length));
+    const draws = [];
+    lines.forEach((ln, li) => {
+      const own = steps.filter((st) => st.li === li);
+      own.forEach((st, k) => {
+        const idx = steps.indexOf(st); const a = t0 + idx * dt; const isLast = k === own.length - 1;
+        const b = isLast ? t1 : t0 + (idx + 1) * dt;
+        const tf = textFile(workDir, `${path.basename(out)}.meme${li}_${k}.txt`, st.text);
+        draws.push(`drawtext=${fontOpt()}textfile='${esc(tf)}':fontsize=86:fontcolor=white:borderw=9:bordercolor=black:shadowx=4:shadowy=6:shadowcolor=black@0.5:` +
+          `x=(w-text_w)/2:y=${(facecam ? CAM_H + 300 : 820) + li * 104}:enable='between(t,${a.toFixed(2)},${b.toFixed(2)})'`);
+      });
+      shown++;
+    });
+    if (draws.length) fc = fc.replace(/\[v0\];$/, `,${draws.join(',')}[v0];`);
+  }
+  const au = await audioSource(src, span);
+  const asel = parts && au.label === '0:a' ? `aselect='${partsExpr(parts)}',asetpts=N/SR/TB,` : '';
+  fc += `[${au.label}]${asel}aresample=48000,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[a0]`;
   let v = 'v0', a = 'a0', inputs = [];
   // end card: the subscribe animation over the last 3.4 s (inside the safe area, above the subtitles)
-  const cardT = endCard && dur >= 9 ? dur - 3.4 : null;
+  // never over the climax/reaction: starts after it, skipped if there's no room left
+  let cardT = endCard && dur >= 9 ? Math.max(dur - 3.4, peakT + 3.0) : null;
+  if (cardT !== null && cardT > dur - 2.4) cardT = null;
   const cardEvents = cardT !== null ? await fx.subscribeEvents(cardT, 40, (facecam ? CAM_H : 0) + 150, endCard) : [];
   if (cardEvents.length) { fc += `;[v0]drawbox=x=0:y=0:w=iw:h=ih:color=black@0.3:t=fill:enable='gte(t,${cardT.toFixed(2)})'[vd]`; v = 'vd'; }
   if (effects || cardEvents.length) {
@@ -206,9 +249,9 @@ async function renderShortRaw(src, seg, out, workDir, { words = [], accent = '#F
     fc += `;[${v}]subtitles=filename='${esc(ass)}'${FONT ? `:fontsdir='${esc(path.dirname(FONT))}'` : ''}[vs]`; v = 'vs';
   }
   fc += `;[${a}]highpass=f=70,acompressor=threshold=0.125:ratio=2.5:attack=15:release=200:makeup=1.5,equalizer=f=3000:t=q:w=1.2:g=3,loudnorm=I=-14:TP=-1.5:LRA=11,aresample=48000,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[aout]`;
-  await run(FFMPEG, ['-y', '-hide_banner', '-loglevel', 'error', '-ss', String(seg.start), '-t', dur.toFixed(2), '-i', src, ...au.inputs, ...inputs,
+  await run(FFMPEG, ['-y', '-hide_banner', '-loglevel', 'error', '-ss', String(seg.start), '-t', span.toFixed(2), '-i', src, ...au.inputs, ...inputs,
     '-filter_complex', fc, '-map', `[${v}]`, '-map', '[aout]', '-t', dur.toFixed(2),
-    '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '160k', '-ac', '2', '-ar', '48000', '-movflags', '+faststart', out]);
+    '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-maxrate', '16M', '-bufsize', '32M', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '160k', '-ac', '2', '-ar', '48000', '-movflags', '+faststart', out]);
 }
 
 // 1280x720 thumbnail: punchy frame, darkened bottom, huge outlined text

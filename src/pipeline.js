@@ -84,7 +84,7 @@ function explainYtdlp(e) {
   return e;
 }
 const { run, sleep, fmtTime, dayKey, TZ_OFFSET } = require('./util');
-const { findHighlights } = require('./analyze');
+const { findHighlights, storyParts } = require('./analyze');
 const render = require('./render');
 const subs = require('./subtitles');
 const ai = require('./ai');
@@ -230,7 +230,7 @@ function chooseMoments(candidates, aiRes, settings) {
   const scored = candidates.map((c, i) => {
     const a = byIdx.get(i);
     const final = a ? (a.score / 10) * 0.7 + (c.score / maxAudio) * 0.3 : c.score / maxAudio;
-    return { ...c, final: Number(final.toFixed(3)), caption: a?.caption || '', shortTitle: a?.short_title || '', emoji: a?.emoji || '', aiScore: a?.score ?? null };
+    return { ...c, final: Number(final.toFixed(3)), caption: a?.caption || '', shortTitle: a?.short_title || '', emoji: a?.emoji || '', meme: a?.meme || '', aiScore: a?.score ?? null };
   }).filter((c) => c.aiScore === null || c.aiScore >= 3).sort((a, b) => b.final - a.final);
   const picked = []; let total = 0;
   for (const c of scored) {
@@ -255,7 +255,7 @@ async function processJob(job) {
   if (source?.credit) job.author = source.credit;
 
   setJob(job.id, { status: 'analyzing', step: 'Qiziq lahzalar qidirilmoqda', progress: 0 });
-  const { info, candidates } = await findHighlights(src, { count: settings.highlightCount, before: settings.clipBefore, after: settings.clipAfter },
+  const { info, candidates, score } = await findHighlights(src, { count: settings.highlightCount, before: settings.clipBefore, after: settings.clipAfter },
     (p) => setJob(job.id, { progress: p }));
   setJob(job.id, { duration: info.duration });
   if (!candidates.length) throw new Error('Qiziq lahza topilmadi (video juda jim yoki qisqa)');
@@ -325,19 +325,35 @@ async function processJob(job) {
     for (let i = 0; i < Math.min(settings.shortsPerVideo, picked.length); i++) {
       const m = picked[i]; const title = m.shortTitle || tpl.shortTitle(i);
       const out = path.join(outDir, `short_${i + 1}.mp4`); const thumb = path.join(outDir, `short_${i + 1}.jpg`);
-      // listen to a wider stretch around the moment, then pick hook start + clean end from the speech
       const peak = m.peak ?? (m.start + m.end) / 2;
-      const w0 = Math.max(0, peak - 8), wDur = Math.min(info.duration - w0, 30);
-      const wide = settings.subtitles ? await subs.transcribe(src, w0, wDur, dir, { model: settings.asrModel, lang: settings.subtitleLang, to: settings.language, context: { title: meta.title || job.title, subject: video.subject } }) : [];
-      const abs = wide.map((w) => ({ ...w, start: w.start + w0, end: w.end + w0 }));
-      const win = info.duration <= 75 ? { start: m.start, end: m.end, peak } : shortWindow({ ...m, peak }, abs, info.duration);
-      const s = { ...m, ...win };
-      const words = abs.filter((w) => w.end > s.start && w.start < s.end).map((w) => ({ ...w, start: +(w.start - s.start).toFixed(2), end: +(w.end - s.start).toFixed(2) }));
+      const asr = { model: settings.asrModel, lang: settings.subtitleLang, to: settings.language, context: { title: meta.title || job.title, subject: video.subject } };
+      let s, words;
+      if (settings.storyShorts && info.duration > 150 && score) {
+        // story Short: the build-up before the climax with the dead time cut out (jump cuts), ending on the reaction
+        // with the subscribe card at the end, keep ~3.5 s more after the climax so the reaction isn't covered
+        const parts = storyParts(score, peak, info.duration, { target: settings.shortTarget || 55, after: settings.outro ? 8.5 : 5 });
+        const base = parts[0].start;
+        const rel = parts.map((p) => ({ start: +(p.start - base).toFixed(2), end: +(p.end - base).toFixed(2) }));
+        let acc = 0, peakOut = 0;
+        for (const p of parts) { if (peak >= p.start && peak <= p.end) { peakOut = acc + (peak - p.start); break; } acc += p.end - p.start; }
+        s = { ...m, start: base, end: parts[parts.length - 1].end, peak, peakOut, parts: rel };
+        words = settings.subtitles ? await subs.transcribe(src, base, s.end - base, dir, { ...asr, select: rel.map((p) => `between(t,${p.start.toFixed(2)},${p.end.toFixed(2)})`).join('+') }) : [];
+        log(`#${job.id}: hikoyali Shorts — ${parts.length} bo'lak, ${Math.round(rel.reduce((t, p) => t + p.end - p.start, 0))} s`);
+      } else {
+        // single moment: listen to a wider stretch, then pick a hook start + clean end from the speech
+        const w0 = Math.max(0, peak - 8), wDur = Math.min(info.duration - w0, 30);
+        const wide = settings.subtitles ? await subs.transcribe(src, w0, wDur, dir, asr) : [];
+        const abs = wide.map((w) => ({ ...w, start: w.start + w0, end: w.end + w0 }));
+        const win = info.duration <= 75 ? { start: m.start, end: m.end, peak } : shortWindow({ ...m, peak }, abs, info.duration);
+        s = { ...m, ...win };
+        words = abs.filter((w) => w.end > s.start && w.start < s.end).map((w) => ({ ...w, start: +(w.start - s.start).toFixed(2), end: +(w.end - s.start).toFixed(2) }));
+      }
       await render.renderShort(src, s, out, dir, { words, accent: settings.accent, style: settings.subtitleStyle, emoji: s.emoji, effects: settings.effects, emojis: settings.emojis, facecam,
-        zoom: settings.zoom, endCard: settings.outro ? card : null });
+        zoom: settings.zoom, endCard: settings.outro ? card : null, meme: settings.memes ? s.meme : '' });
       await render.grabFrame(out, 1.5, thumb, 540);
       const description = [title, '', creditLine(job), '', ['#shorts', ...hashtags].join(' ')].join('\n');
-      const r = ins.run(job.id, 'short', out, thumb, JSON.stringify([s]), Math.min(58, s.end - s.start), s.final,
+      const shortDur = s.parts ? s.parts.reduce((t, p) => t + p.end - p.start, 0) : s.end - s.start;
+      const r = ins.run(job.id, 'short', out, thumb, JSON.stringify([s]), Math.min(60, shortDur), s.final,
         (title + ' #shorts').slice(0, 100), description, JSON.stringify([...tags.slice(0, 10), 'shorts']), '', status, settings.privacy, Date.now());
       created.push(Number(r.lastInsertRowid)); done++;
       setJob(job.id, { progress: done / totalSteps });

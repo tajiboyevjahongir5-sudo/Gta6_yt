@@ -361,6 +361,8 @@ async function settings() {
       <div class="row"><div class="grow">${inp('clipBefore', 'Lahzadan oldin (s)', 'number')}</div><div class="grow">${inp('clipAfter', 'Lahzadan keyin (s)', 'number')}</div></div>
       ${sw('facecamLayout', 'Webkamera tepada (Shorts)', 'Videoda streamer kamerasi bo\'lsa: tepada kamera, pastda o\'yin. Kamera bo\'lmasa oddiy ko\'rinish')}
       ${sw('effects', 'Ovoz effektlari', 'Whoosh, boom — eng qiziq joylarda')}
+      ${sw('storyShorts', 'Hikoyali Shorts (jump cut)', 'Eng qiziq joygacha bo\'lgan voqea zerikarli joylari kesilib ~55 s ga qisqaradi, eng qiziq joyda o\'yin butun ekranga chiqadi')}
+      ${sw('memes', 'Mem-yozuv eng qiziq joyda', 'AI yozgan qisqa hazil yozuv so\'zma-so\'z chiqadi')}
       ${sw('zoom', 'Zoom eng qiziq joyda', 'Kadr keskin yaqinlashadi va silliq qaytadi')}
       ${sw('outro', 'Chiroyli yakun + obuna animatsiyasi', 'Oxirida: SUBSCRIBE tugmasi bosiladi, qo\'ng\'iroqcha chalinadi (videoga 6 s outro, Shorts oxirgi 3.4 s)')}
       <div class="card" style="background:var(--s2);margin-top:8px"><b class="small">Obuna animatsiyasi</b>

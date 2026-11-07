@@ -116,13 +116,14 @@ const SCHEMA = {
         badge: { type: 'string', description: 'max 12 chars label for the thumbnail corner (e.g. game name), or empty' },
       } },
     moments: { type: 'array', items: { type: 'object', additionalProperties: false,
-      required: ['index', 'score', 'caption', 'short_title', 'emoji'],
+      required: ['index', 'score', 'caption', 'short_title', 'emoji', 'meme'],
       properties: {
         index: { type: 'integer' },
         score: { type: 'integer', description: '0-10: how interesting this moment is for a viewer of this kind of video' },
         caption: { type: 'string', description: '2-5 word caption of what happens in this moment' },
         short_title: { type: 'string', description: 'Shorts title for this moment: max 50 chars, punchy, makes people want to see what happens; no #shorts, no emojis spam' },
         emoji: { type: 'string', enum: EMOJIS, description: 'reaction emoji that pops up on the key moment' },
+        meme: { type: 'string', description: 'meme-style punchline shown big on screen at the climax (2-6 words, like a human editor would write; funny, fits what happens; empty if nothing fits)' },
       } } },
     long: { type: 'object', additionalProperties: false, required: ['title', 'description', 'tags', 'thumb_text'],
       properties: {
@@ -159,7 +160,7 @@ async function rankAndDescribe({ candidates, source, settings, context = {} }) {
     `Never assume a game that the evidence doesn't show.` +
     (settings.game ? ` The channel owner says the topic is usually "${settings.game}" — use it only if the evidence agrees.` : '') + `\n` +
     `2) Score each moment 0-10 for a viewer of this kind of content (low for menus, loading screens, AFK, black screens, ads, silence).\n` +
-    `3) Give each moment a caption, a Shorts title and one reaction emoji.\n` +
+    `3) Give each moment a caption, a Shorts title, one reaction emoji and a short meme punchline for its climax.\n` +
     `4) Write the YouTube title, description, tags and thumbnail text for a highlights compilation of this video. ` +
     `Everything must describe what is actually in this video; use real names (game, people, teams) when the evidence shows them.\n` +
     `Write in ${LANG[settings.language] || settings.language}. Channel name: ${settings.channelName}. ` +

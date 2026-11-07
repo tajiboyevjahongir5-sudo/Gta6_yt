@@ -26,14 +26,15 @@ let unavailable = false;
 // Speech -> words with timings. Recognition in the speaker's own language with a big Whisper model; if the video
 // language is different (e.g. Russian speech, English channel) the AI translates phrase by phrase, fixing words
 // Whisper misheard from the video's context. Timings stay Whisper's, so the subtitles still follow the voice.
-async function transcribe(src, start, dur, workDir, { model = 'large-v3-turbo', lang = 'auto', to = 'en', context = {} } = {}) {
+async function transcribe(src, start, dur, workDir, { model = 'large-v3-turbo', lang = 'auto', to = 'en', context = {}, select = '' } = {}) {
   if (unavailable) return [];
   const wav = path.join(workDir, `sub_${Math.round(start)}.wav`);
   const hint = [context.title, context.subject].filter(Boolean).join('. ');
   try {
     // speech band + noise reduction + level: game music/explosions confuse recognition
     await run(FFMPEG, ['-y', '-hide_banner', '-loglevel', 'error', '-ss', String(start), '-t', String(dur), '-i', src, '-vn',
-      '-af', 'highpass=f=90,lowpass=f=7500,afftdn=nf=-25,dynaudnorm=f=150:g=15', '-ac', '1', '-ar', '16000', wav]);
+      // select: jump-cut Shorts - transcribe exactly the kept parts, so word times match the edited video
+      '-af', (select ? `aselect='${select}',asetpts=N/SR/TB,` : '') + 'highpass=f=90,lowpass=f=7500,afftdn=nf=-25,dynaudnorm=f=150:g=15', '-ac', '1', '-ar', '16000', wav]);
     const asr = async (extra = []) => JSON.parse((await run(PY, [SCRIPT, wav, '--model', model, '--lang', lang, '--context', hint, ...extra],
       { timeoutMs: 20 * 60000 })).out);
     let j = await asr();
