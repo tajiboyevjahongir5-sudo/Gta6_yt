@@ -1,6 +1,6 @@
 # Lahza — stream'lardan avtomatik YouTube kanal
 
-**Lahza** uzun jonli efir yozuvlarini (GTA 6 va boshqa o'yinlar) oladi, eng qiziq lahzalarni o'zi topadi, montaj qiladi
+**Lahza** istalgan uzun video yoki jonli efir yozuvini (o'yinlar, sport, vlog, podkast…) oladi, nima haqida ekanini o'zi aniqlaydi, eng qiziq lahzalarni o'zi topadi, montaj qiladi
 va YouTube kanalingizga **prevyu, nom, tavsif, teglar va taym-kodlar** bilan yuklaydi. Hammasi Telegram bot va
 Telegram Web App orqali boshqariladi.
 
@@ -21,10 +21,11 @@ Havola / kuzatilgan kanal ─► yuklab olish (yt-dlp) ─► tahlil: ovoz + har
 | **Subtitr** (Shorts) | "Pop" uslubi: har bir so'z aynan aytilganda sakrab chiqadi, oxirgisi sariq. Yana "Toza" (kursiv) va "Karaoke" uslublari. Joylashuvi YouTube interfeysiga moslangan — pastga qarang |
 | **Effektlar** | Ovoz effektlari: o'tishda *whoosh*, eng qiziq lahzada *boom*, emoji chiqqanda *pop* (ffmpeg'da sintez qilinadi — mualliflik muammosi yo'q; o'zingiznikini `data/sfx/boom.wav` va h.k. qilib qo'ysangiz o'shalar ishlatiladi). Animatsion emojilar (😂💀🔥😱🚓💥…): sakrab chiqadi, tebranadi, yo'qoladi; AI har lahzaga mosini tanlaydi, subtitrdagi so'zlar ham emoji chaqiradi ("cops" → 🚓, "lol" → 😂) |
 | **Kanal brendi** | 5 ta nom, 5 ta @username, SEO tavsif, kalit so'zlar, banner 2560×1440 (matn YouTube xavfsiz zonasida) va logo 800×800. Kanal ulanganda avtomatik tayyorlanib botga keladi. Banner, tavsif va kalit so'zlar bir tugma bilan kanalga o'rnatiladi; nom, username va logoni YouTube API o'zgartirishga ruxsat bermaydi — ular nusxa olish/yuklab olish tugmalari bilan beriladi |
-| **Prevyu** | 1280×720, eng kuchli kadr, to'yingan ranglar, katta qalin yozuv, "GTA 6" belgisi. Panelda yozuvni o'zgartirib qayta chizish mumkin |
+| **Videoni tushunish** | AI butun videoni o'rganadi: YouTube'dagi nomi, tavsifi, teglari, bo'limlari, nutq matni (YouTube subtitrlari) va videoning boshidan oxirigacha olingan kadrlar. Mavzuni aniqlaydi (qaysi o'yin, qaysi jamoalar, qanday vlog), nom/tavsif/teg/hashtag va YouTube kategoriyasini aynan shu videoga mos yozadi. AI kalitisiz — videoning o'z ma'lumotlaridan |
+| **Prevyu** | 1280×720, eng kuchli kadr, to'yingan ranglar, katta qalin yozuv, burchakda mavzu belgisi (masalan o'yin nomi). Panelda yozuvni o'zgartirib qayta chizish mumkin |
 | **Tavsif** | AI matni + avtomatik taym-kodlar (YouTube bo'limlari) + original stream muallifi havolasi + sizning doimiy oxiringiz |
 | **Nashr** | Tasdiqlab yoki avto-rejimda; belgilangan vaqtlarda (masalan 13:00 va 19:00), kunlik limit bilan |
-| **Manbalar** | YouTube / Twitch / Kick kanallarini kuzatadi: efir tugab yozuvi chiqqach (sarlavhada "GTA" bo'lsa, 30+ daqiqa) o'zi navbatga qo'yadi |
+| **Manbalar** | YouTube / Twitch / Kick kanallarini kuzatadi: efir tugab yozuvi chiqqach (xohlasangiz sarlavha filtri, masalan "GTA"; 30+ daqiqa) o'zi navbatga qo'yadi |
 | **Statistika** | Obunachilar, kunlik ko'rishlar, Video vs Shorts, eng ko'p ko'rilganlar |
 
 ### Shorts maketi
@@ -35,7 +36,7 @@ Joylashuv haqiqiy telefon skrinshotidan o'lchangan (YouTube ilovasi, 2026). 1080
 | Yurak, koment, saqlash, ulashish, remiks | x ≥ 935, y ≥ 1026 | subtitr x 160–920 oralig'ida, markazda |
 | Qidiruv maslahati, @kanal + Subscribe, nom | y ≥ 1634 | subtitr y≈1400 da tugaydi (234px zaxira) |
 
-Tartib (mashhur GTA edit Shorts'lar kabi): xira fon ustida o'yin kadri (y 430–1430, kattalashtirilgan), uning pastki qismida subtitr.
+Tartib (mashhur edit Shorts'lar kabi): xira fon ustida o'yin kadri (y 430–1430, kattalashtirilgan), uning pastki qismida subtitr.
 Videoning o'ziga boshqa yozuv qo'shilmaydi — nom YouTube'ning nom maydonida chiqadi. Uslub: **Pop** (so'zlar ovozga mos chiqadi), **Toza** (kursiv, oq) yoki **Karaoke** (qalin, aytilayotgan so'z sariq). Emojilar kadrning yuqori qismida, tugmalar ustuniga tushmaydi.
 Panel → Kliplar → Shorts → **"📐 YouTube interfeysini ko'rsatish"** — tugmalar va tavsif qayerga tushishini video ustida ko'rasiz.
 
@@ -48,7 +49,8 @@ Panel → Kliplar → Shorts → **"📐 YouTube interfeysini ko'rsatish"** — 
 - **Sozlamalar** (⚙️) — YouTube kanalni ulash (yoki Asosiy sahifadagi katta tugma), 🎨 Kanal brendi, jadval, montaj, effektlar, subtitr, til, teglar
 
 ### Bot buyruqlari
-Havola yuborish — navbatga qo'shadi · `/navbat` · `/kliplar` · `/stat` · `/yordam`.
+Havola yuborish — navbatga qo'shadi · `/navbat` · `/kliplar` · `/stat` · `/cookies` · `/yordam`.
+`cookies.txt` faylini botga yuborsangiz — saqlanadi va xato bergan videolar qayta boshlanadi.
 Har bir tayyor klip prevyu bilan keladi: **✅ Tasdiqlash / 🚀 Hozir yuklash / ❌ Rad etish**.
 
 ## O'rnatish
@@ -144,3 +146,8 @@ Ma'lumotlar `DATA_DIR` da: `lahza.db`, `work/` (vaqtinchalik), `out/` (tayyor kl
 - Subtitr matnini AI bilan tuzatish (Whisper o'zbek tilida ba'zan adashadi)
 - Bir nechta kanal (o'zbekcha va ruscha) va TikTok / Instagram Reels'ga ham yuklash
 - Prevyu A/B test (YouTube "Test & Compare")
+
+## YouTube serverni bloklasa
+Railway kabi ma'lumot markazlaridan kelgan so'rovlarni YouTube ko'pincha "Sign in to confirm you're not a bot" deb to'xtatadi.
+Lahza avval boshqa rasmiy YouTube klientlari bilan qayta urinadi; o'tmasa — **cookies** kerak: kompyuterda
+"Get cookies.txt LOCALLY" kengaytmasi bilan **ikkinchi** Google akkauntdan eksport qilib, faylni botga yuboring (`/cookies` — yo'riqnoma).

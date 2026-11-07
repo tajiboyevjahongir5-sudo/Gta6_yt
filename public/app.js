@@ -239,7 +239,7 @@ async function sources() {
   $('#view').innerHTML = `<h2>Kuzatiladigan kanallar</h2>
     <div class="card">
       <label class="f">Kanal havolasi</label><input type="url" id="su" placeholder="https://www.youtube.com/@streamer yoki twitch.tv/streamer">
-      <div class="row"><div class="grow"><label class="f">Sarlavhada bo'lishi kerak</label><input type="text" id="sk" value="GTA" placeholder="masalan: GTA"></div>
+      <div class="row"><div class="grow"><label class="f">Sarlavhada bo'lishi kerak</label><input type="text" id="sk" value="" placeholder="bo'sh = hammasi, masalan: GTA"></div>
       <div style="width:110px"><label class="f">Min. daqiqa</label><input type="number" id="sm" value="30"></div></div>
       <label class="f">Mualliflik uchun ism (tavsifga yoziladi)</label><input type="text" id="sc" placeholder="Streamer nomi">
       <div class="switch"><span class="small">Muallif kliplash uchun ruxsat bergan</span><input type="checkbox" id="sp"></div>
@@ -303,7 +303,7 @@ async function settings() {
     <div class="card">
       ${sw('useAI', 'AI yordamchi', o.ai ? 'Kadrlarni ko\'rib baholaydi va matnlarni yozadi' : 'ANTHROPIC_API_KEY sozlanmagan')}
       <label class="f">Video tili (nom, tavsif, teglar, subtitr)</label><select data-k="language">${[['en', 'Inglizcha'], ['ru', 'Ruscha'], ['uz', "O'zbekcha"]].map(([v, t]) => `<option value="${v}" ${s.language === v ? 'selected' : ''}>${t}</option>`).join('')}</select>
-      ${inp('game', "O'yin nomi")}
+      ${inp('game', "Mavzu (bo'sh qoldiring — har video uchun AI o'zi aniqlaydi)")}
       ${inp('channelName', 'Kanal nomi')}
       ${inp('defaultTags', 'Doimiy teglar (vergul bilan)')}
       <label class="f">Tavsif oxiri</label><textarea data-k="descriptionFooter" style="min-height:80px">${esc(s.descriptionFooter)}</textarea>
@@ -369,7 +369,7 @@ async function openBrand() {
     const v = Date.now();
     $('#sheetBody').innerHTML = `<div class="row" style="margin-bottom:10px"><b class="grow">🎨 Kanal brendi</b><button class="icon" id="x">✕</button></div>
     ${!k ? `<p class="muted small">AI kanalingiz uchun nom, @username, tavsif, kalit so'zlar, banner (2560×1440) va logo (800×800) tayyorlaydi.</p>` : ''}
-    <label class="f">Istaklaringiz (ixtiyoriy)</label><input type="text" id="hint" placeholder="masalan: qisqa, kulgili, 'Vice' so'zi bo'lsin">
+    <label class="f">Istaklaringiz (ixtiyoriy)</label><input type="text" id="hint" placeholder="masalan: qisqa, kulgili, o'yin nomi bo'lsin">
     <button class="btn ${k ? '' : 'primary'}" id="gen" style="width:100%;margin-top:8px">${k ? '🔄 Qaytadan yaratish' : '✨ Brend yaratish'}</button>
     ${k ? `
       <h2>Nom</h2><div class="chips">${k.names.map((n) => `<span data-copy="${esc(n)}" style="cursor:pointer;${n === k.chosen ? 'outline:2px solid var(--accent)' : ''}">${esc(n)}</span>`).join('')}</div>
@@ -418,7 +418,7 @@ function openCookies() {
         <li>Inkognito oynada youtube.com ga ikkinchi akkaunt bilan kiring</li>
         <li>Kengaytmani bosing → <b>Export</b> (Netscape format) → fayl yuklanadi</li>
         <li>Inkognito oynani <b>yoping</b> (chiqib ketmang — "Sign out" cookies'ni bekor qiladi)</li>
-        <li>Faylni shu yerga yuklang</li></ol></div>
+        <li>Faylni shu yerga yuklang <b>yoki Telegram'da botga yuboring</b></li></ol></div>
     <label class="f">cookies.txt fayli</label><input type="file" id="ckFile" accept=".txt,text/plain">
     <label class="f">yoki matnini qo'ying</label><textarea id="ckText" style="min-height:90px;font-size:11px" placeholder="# Netscape HTTP Cookie File ..."></textarea>
     <div class="row" style="margin-top:10px"><button class="btn primary grow" id="ckSave">Saqlash</button><button class="btn danger" id="ckDel">O'chirish</button></div>`;

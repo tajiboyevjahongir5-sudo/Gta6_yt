@@ -198,14 +198,8 @@ async function api(req, res, url) {
     return send(res, 200, { has, updated: has ? fs.statSync(f).mtimeMs : null });
   }
   if (p === '/api/cookies' && m === 'POST') {
-    const text = String(b.text || '').replace(/\r/g, '');
-    // Netscape cookies.txt: tab-separated lines; must contain YouTube/Google login cookies
-    const lines = text.split('\n').filter((l) => l.split('\t').length >= 7);
-    if (!lines.length) return send(res, 400, { error: 'Bu cookies.txt emas. "Get cookies.txt LOCALLY" kengaytmasi bilan Netscape formatida eksport qiling' });
-    if (!lines.some((l) => /youtube\.com|google\.com/.test(l))) return send(res, 400, { error: 'Faylda youtube.com cookies yo\'q. YouTube sahifasida turib eksport qiling' });
-    fs.writeFileSync(pipeline.COOKIES, (text.startsWith('# Netscape') ? '' : '# Netscape HTTP Cookie File\n') + text, { mode: 0o600 });
-    log(`YouTube cookies yuklandi (${lines.length} ta)`);
-    return send(res, 200, { has: true, updated: Date.now(), count: lines.length });
+    try { const count = pipeline.saveCookies(b.text); return send(res, 200, { has: true, updated: Date.now(), count }); }
+    catch (e) { return send(res, 400, { error: e.message }); }
   }
   if (p === '/api/cookies' && m === 'DELETE') { fs.rmSync(pipeline.COOKIES, { force: true }); return send(res, 200, { has: false }); }
   if (p === '/api/youtube/setup' && m === 'GET') return send(res, 200, yt.setupInfo());
@@ -273,6 +267,18 @@ const server = http.createServer(async (req, res) => {
 // ---------- bot commands ----------
 const STATUS_UZ = { queued: '⏳ navbatda', downloading: '⬇️ yuklanmoqda', analyzing: '🔍 tahlil', rendering: '🎬 montaj', waiting: '🔴 efir tugashini kutmoqda', done: '✅ tayyor', failed: '⚠️ xato' };
 const botHandlers = {
+  // a cookies.txt sent to the bot is saved straight away (exporting on a computer and sending via Telegram is easiest)
+  async onDocument(doc) {
+    if (!/\.txt$/i.test(doc.file_name || '') && doc.mime_type !== 'text/plain') return 'Faqat cookies.txt faylini qabul qilaman';
+    if (doc.file_size > 2e6) return 'Fayl juda katta';
+    try {
+      const count = pipeline.saveCookies(await tg.downloadFile(doc.file_id));
+      const failed = db.prepare("SELECT id FROM jobs WHERE status = 'failed'").all();
+      for (const j of failed) updateRow('jobs', j.id, { status: 'queued', error: null, progress: 0 });
+      if (failed.length) pipeline.kick();
+      return `✅ YouTube cookies saqlandi (${count} ta).` + (failed.length ? ` Xato bergan ${failed.length} ta video qayta navbatga qo'yildi.` : '');
+    } catch (e) { return '⚠️ ' + e.message; }
+  },
   async onLink(url) {
     try { const r = pipeline.addJob(url); return r.duplicate ? `Bu video allaqachon bor (#${r.id})` : `✅ Navbatga qo'shildi (#${r.id}). Tayyor bo'lganda kliplarni yuboraman.`; }
     catch (e) { return '⚠️ ' + e.message; }
@@ -300,6 +306,9 @@ const botHandlers = {
       return `📊 <b>${tg.escHtml(ch?.title || 'Kanal ulanmagan')}</b>\n` + (ch && !ch.error ? `Obunachilar: ${ch.subscribers}\nKo'rishlar: ${ch.views}\nVideolar: ${ch.videos}\n` : '') +
         `\nYuklangan kliplar: ${o.counts.published}\nNavbatda: ${o.counts.queue}\nTasdiq kutmoqda: ${o.counts.drafts}\nRejada: ${o.counts.scheduled}\nBugun: ${o.counts.todayUploads}/${o.counts.dailyLimit}`;
     }
+    if (cmd === '/cookies') return `🍪 <b>YouTube cookies</b> — YouTube serverni bloklasa yoki video 18+ bo'lsa kerak.\n\n` +
+      `1) Kompyuterda Chrome'ga "Get cookies.txt LOCALLY" kengaytmasini o'rnating\n2) Inkognito oynada youtube.com ga ikkinchi akkaunt bilan kiring\n` +
+      `3) Kengaytma → Export → fayl yuklanadi\n4) Inkognito oynani yoping (Sign out qilmang)\n5) Faylni shu botga yuboring — men saqlayman va xato bergan videolarni qayta boshlayman`;
     if (cmd === '/yordam') return `1) Sozlamalarda YouTube kanalni ulang\n2) Stream havolasini yuboring yoki Manbalar'ga kanal qo'shing\n` +
       `3) Bot uzun videodan eng baland/harakatli lahzalarni topadi, AI ularni baholaydi\n4) Kompilyatsiya (10 daq) va Shorts'lar tayyorlanadi, prevyu, nom, tavsif, teglar avtomatik\n` +
       `5) ✅ bosing — belgilangan vaqtda kanalga chiqadi (yoki Sozlamalarda "Avto-nashr"ni yoqing)`;

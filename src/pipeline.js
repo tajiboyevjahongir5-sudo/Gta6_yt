@@ -12,15 +12,26 @@ function ytArgs() {
   const copy = path.join(DATA_DIR, 'cookies.run.txt'); fs.copyFileSync(COOKIES, copy);
   return ['--cookies', copy];
 }
+function saveCookies(text) {
+  text = String(text || '').replace(/\r/g, '');
+  const lines = text.split('\n').filter((l) => l.split('\t').length >= 7);
+  if (!lines.length) throw new Error('Bu cookies.txt emas. "Get cookies.txt LOCALLY" kengaytmasi bilan Netscape formatida eksport qiling');
+  if (!lines.some((l) => /youtube\.com|google\.com/.test(l))) throw new Error('Faylda youtube.com cookies yo\'q. YouTube sahifasida turib eksport qiling');
+  fs.writeFileSync(COOKIES, (text.startsWith('# Netscape') ? '' : '# Netscape HTTP Cookie File\n') + text, { mode: 0o600 });
+  log(`YouTube cookies yuklandi (${lines.length} ta)`);
+  return lines.length;
+}
 // turn yt-dlp's long English errors into something actionable
 function explainYtdlp(e) {
   const m = e.message;
+  const why = ((m.match(/ERROR:[^|]*/) || [''])[0].replace(/^ERROR:\s*(\[\w+\]\s*[\w-]+:\s*)?/, '').split('. ')[0] || '').slice(0, 140);
+  const wrap = (txt) => new Error(txt + (why ? ` (YouTube: ${why})` : ''));
   if (/confirm your age|age-restricted|Sign in to confirm|not a bot|cookies/i.test(m))
-    return new Error(fs.existsSync(COOKIES)
+    return wrap(fs.existsSync(COOKIES)
       ? 'YouTube kirishni talab qildi, cookies eskirgan bo\'lishi mumkin: Sozlamalar → 🍪 YouTube cookies ni yangilang'
-      : 'YouTube kirishni talab qilyapti (18+ video yoki bot tekshiruvi): Sozlamalar → 🍪 YouTube cookies ni yuklang, keyin "Qayta urinish"');
-  if (/Private video|members-only|Join this channel/i.test(m)) return new Error('Video yopiq yoki faqat a\'zolar uchun');
-  if (/is not available|Video unavailable/i.test(m)) return new Error('Video mavjud emas yoki o\'chirilgan');
+      : 'YouTube serverni bloklayapti (bot tekshiruvi yoki 18+): cookies.txt faylini botga yuboring yoki Sozlamalar → 🍪 YouTube cookies, keyin "Qayta urinish"');
+  if (/Private video|members-only|Join this channel/i.test(m)) return wrap('Video yopiq yoki faqat a\'zolar uchun');
+  if (/is not available|Video unavailable/i.test(m)) return wrap('Video mavjud emas yoki o\'chirilgan');
   return e;
 }
 const { run, sleep, fmtTime, dayKey, TZ_OFFSET } = require('./util');
@@ -47,21 +58,62 @@ function addJob(url, sourceId = null, meta = {}) {
 }
 const setJob = (id, patch) => updateRow('jobs', id, { ...patch, updated_at: Date.now() });
 
+const BLOCKED = /confirm your age|Sign in to confirm|not a bot|cookies/i;
+// YouTube sometimes blocks the default web client from data-centre IPs but lets other official clients through
+const ALT_CLIENTS = ['--extractor-args', 'youtube:player_client=tv,web_safari,mweb'];
+async function ytdlp(args, opts, state) {
+  try { return await run(YTDLP, [...ytArgs(), ...(state.alt ? ALT_CLIENTS : []), ...args], opts); }
+  catch (e) {
+    if (state.alt || !BLOCKED.test(e.message)) throw explainYtdlp(e);
+    state.alt = true;
+    try { return await run(YTDLP, [...ytArgs(), ...ALT_CLIENTS, ...args], opts); } catch (e2) { throw explainYtdlp(e2); }
+  }
+}
+
 async function download(job, dir, quality) {
-  const { out } = await run(YTDLP, [...ytArgs(), '--dump-single-json', '--no-playlist', '--no-warnings', job.url], { timeoutMs: 120000 }).catch((e) => { throw explainYtdlp(e); });
+  const state = {};
+  const { out } = await ytdlp(['--dump-single-json', '--no-playlist', '--no-warnings', job.url], { timeoutMs: 120000 }, state);
   const meta = JSON.parse(out);
   if (meta.is_live || meta.live_status === 'is_live' || meta.live_status === 'is_upcoming') {
     const e = new Error('Efir hali tugamagan — tugagach avtomatik qayta urinadi'); e.waitLive = true; throw e; }
+  // what the AI needs to understand the video
+  const keep = { title: meta.title, description: String(meta.description || '').slice(0, 5000), tags: (meta.tags || []).slice(0, 40),
+    categories: meta.categories || [], channel: meta.channel || meta.uploader, duration: meta.duration, language: meta.language,
+    chapters: (meta.chapters || []).slice(0, 60).map((c) => ({ start_time: c.start_time, title: c.title })) };
   setJob(job.id, { title: meta.title, author: meta.uploader || meta.channel, author_url: meta.uploader_url || meta.channel_url,
-    video_id: meta.id, duration: meta.duration || null });
+    video_id: meta.id, duration: meta.duration || null, meta: keep });
   const tmpl = path.join(dir, 'source.%(ext)s');
-  await run(YTDLP, [...ytArgs(), '-f', `bv*[height<=${quality}][ext=mp4]+ba[ext=m4a]/bv*[height<=${quality}]+ba/b[height<=${quality}]/b`,
+  await ytdlp(['-f', `bv*[height<=${quality}][ext=mp4]+ba[ext=m4a]/bv*[height<=${quality}]+ba/b[height<=${quality}]/b`,
     '--merge-output-format', 'mp4', '--no-playlist', '--no-part', '--concurrent-fragments', '4', '--newline', '-o', tmpl, job.url], {
     onLine: (l) => { const m = l.match(/\[download\]\s+([\d.]+)%/); if (m) setJob(job.id, { progress: Number(m[1]) / 100 }); },
-  }).catch((e) => { throw explainYtdlp(e); });
-  const file = fs.readdirSync(dir).find((f) => f.startsWith('source.') && !f.endsWith('.part') && !f.endsWith('.ytdl'));
+  }, state);
+  const file = fs.readdirSync(dir).find((f) => f.startsWith('source.') && /\.(mp4|mkv|webm)$/.test(f));
   if (!file) throw new Error('Video yuklab olinmadi');
-  return { file: path.join(dir, file), meta };
+  const transcript = await fetchTranscript(job.url, dir, state);
+  return { file: path.join(dir, file), meta: keep, transcript };
+}
+
+// YouTube's own captions (manual or auto) as plain text — cheap way for the AI to "hear" the whole video
+async function fetchTranscript(url, dir, state) {
+  try {
+    await ytdlp(['--skip-download', '--write-subs', '--write-auto-subs', '--sub-langs', 'en.*,ru.*,uz.*,.*-orig', '--sub-format', 'vtt',
+      '--no-playlist', '--no-warnings', '-o', path.join(dir, 'subs.%(ext)s'), url], { timeoutMs: 120000 }, state);
+  } catch (e) { return ''; }
+  const files = fs.readdirSync(dir).filter((f) => f.startsWith('subs.') && f.endsWith('.vtt'));
+  // prefer the original-language track, then English
+  const pick = files.find((f) => /-orig\.vtt$/.test(f)) || files.find((f) => /\.en/.test(f)) || files[0];
+  if (!pick) return '';
+  const lines = []; let last = '';
+  for (let l of fs.readFileSync(path.join(dir, pick), 'utf8').split('\n')) {
+    l = l.replace(/<[^>]+>/g, '').trim();
+    if (!l || /-->|^WEBVTT|^Kind:|^Language:|^\d+$/.test(l) || l === last) continue;
+    lines.push(l); last = l;
+  }
+  const text = lines.join(' ');
+  // long streams: keep the start, middle and end so the AI sees the whole arc
+  if (text.length <= 14000) return text;
+  const k = 4600; const mid = Math.floor(text.length / 2);
+  return `${text.slice(0, k)} … ${text.slice(mid - k / 2, mid + k / 2)} … ${text.slice(-k)}`;
 }
 
 // choose final moments: AI score (if any) + loudness score, then fit into the target length
@@ -82,7 +134,7 @@ function chooseMoments(candidates, aiRes, settings) {
   return { picked, ranked: scored };
 }
 
-function creditLine(job) { return job.author ? `🎮 Original stream: ${job.author}${job.url ? ' — ' + job.url : ''}` : ''; }
+function creditLine(job) { return job.author ? `🎬 Original video: ${job.author}${job.url ? ' — ' + job.url : ''}` : ''; }
 
 async function processJob(job) {
   const settings = getSettings();
@@ -90,7 +142,7 @@ async function processJob(job) {
   const outDir = path.join(OUT_DIR, String(job.id)); fs.mkdirSync(outDir, { recursive: true });
 
   setJob(job.id, { status: 'downloading', step: 'Yuklab olinmoqda', progress: 0, error: null });
-  const { file: src } = await download(job, dir, settings.quality);
+  const { file: src, meta, transcript } = await download(job, dir, settings.quality);
   job = db.prepare('SELECT * FROM jobs WHERE id = ?').get(job.id);
   const source = job.source_id ? db.prepare('SELECT * FROM sources WHERE id = ?').get(job.source_id) : null;
   if (source?.credit) job.author = source.credit;
@@ -110,17 +162,23 @@ async function processJob(job) {
       for (const [k, t] of [cands[i].peak - 4, cands[i].peak + 1].entries())
         cands[i].frames.push(await render.grabFrame(src, Math.min(t, info.duration - 1), path.join(dir, `f${i}_${k}.jpg`)));
     }
-    aiRes = await ai.rankAndDescribe({ candidates: cands, source: job, settings });
+    // frames spread over the whole video, so the AI understands what it is, not just the loud bits
+    const overview = [];
+    for (let k = 1; k <= 8; k++) overview.push(await render.grabFrame(src, (info.duration * k) / 9, path.join(dir, `ov${k}.jpg`)));
+    aiRes = await ai.rankAndDescribe({ candidates: cands, source: job, settings, context: { meta, transcript, overview } });
     candidates.length = cands.length;
   }
-  const tpl = ai.templateMeta({ source: job, settings, count: settings.highlightCount });
+  const tpl = ai.templateMeta({ source: job, settings, count: settings.highlightCount, meta });
+  const video = aiRes?.video || tpl.video;
+  setJob(job.id, { meta: { ...meta, subject: video.subject, summary: video.summary } });
+  const hashtags = (video.hashtags || []).map((h) => '#' + String(h).replace(/[^\p{L}\p{N}_]/gu, '')).filter((h) => h.length > 1);
   const { picked } = chooseMoments(candidates, aiRes, settings);
   const long = aiRes?.long || tpl.long;
-  const tags = [...(long.tags || []), ...settings.defaultTags];
+  const tags = [...(long.tags || []), video.subject, ...settings.defaultTags].filter(Boolean);
   const created = [];
   const status = settings.autoPublish ? 'approved' : 'draft';
-  const ins = db.prepare(`INSERT INTO clips (job_id, kind, file, thumb, segments, duration, score, title, description, tags, thumb_text, status, privacy, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+  const ins = db.prepare(`INSERT INTO clips (job_id, kind, file, thumb, segments, duration, score, title, description, tags, thumb_text, status, privacy, created_at, category)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '${String(video.categoryId || '24').replace(/\D/g, '')}')`);
 
   setJob(job.id, { status: 'rendering', step: 'Montaj qilinmoqda', progress: 0 });
   const totalSteps = (settings.makeLong ? 1 : 0) + (settings.makeShorts ? Math.min(settings.shortsPerVideo, picked.length) : 0) || 1;
@@ -130,10 +188,10 @@ async function processJob(job) {
     await render.renderCompilation(src, picked, out, dir, (p) => setJob(job.id, { progress: (done + p) / totalSteps }), { effects: settings.effects });
     const ordered = [...picked].sort((a, b) => a.start - b.start);
     let t = 0; const chapters = ordered.map((s, i) => { const line = `${fmtTime(t)} ${s.caption || (settings.language === 'uz' ? 'Lahza #' : 'Moment #') + (i + 1)}`; t += s.end - s.start; return line; });
-    const description = [long.description, '', settings.language === 'uz' ? '⏱ Taym-kodlar:' : settings.language === 'ru' ? '⏱ Таймкоды:' : '⏱ Chapters:', ...chapters, '', creditLine(job), '', settings.descriptionFooter].filter((x) => x !== undefined).join('\n');
+    const description = [long.description, hashtags.length ? '\n' + hashtags.join(' ') : '', settings.language === 'uz' ? '⏱ Taym-kodlar:' : settings.language === 'ru' ? '⏱ Таймкоды:' : '⏱ Chapters:', ...chapters, '', creditLine(job), '', settings.descriptionFooter].filter((x) => x !== undefined).join('\n');
     const best = picked[0];
     const thumb = path.join(outDir, 'compilation.jpg');
-    await render.renderThumbnail(src, best.peak - 1, long.thumb_text, thumb, dir, { accent: settings.accent, badge: settings.game });
+    await render.renderThumbnail(src, best.peak - 1, long.thumb_text, thumb, dir, { accent: settings.accent, badge: video.badge || '' });
     const r = ins.run(job.id, 'long', out, thumb, JSON.stringify(ordered), t, best.final, long.title, description, JSON.stringify(tags), long.thumb_text, status, settings.privacy, Date.now());
     created.push(Number(r.lastInsertRowid)); done++;
   }
@@ -144,7 +202,7 @@ async function processJob(job) {
       const words = settings.subtitles ? await subs.transcribe(src, s.start, Math.min(58, s.end - s.start), dir, { model: settings.whisperModel, lang: settings.subtitleLang, to: settings.language === 'en' ? 'en' : '' }) : [];
       await render.renderShort(src, s, out, dir, { words, accent: settings.accent, style: settings.subtitleStyle, emoji: s.emoji, effects: settings.effects });
       await render.grabFrame(out, 1.5, thumb, 540);
-      const description = [title, '', creditLine(job), '', `#shorts #${settings.game.replace(/\s+/g, '')} #gaming`].join('\n');
+      const description = [title, '', creditLine(job), '', ['#shorts', ...hashtags].join(' ')].join('\n');
       const r = ins.run(job.id, 'short', out, thumb, JSON.stringify([s]), Math.min(58, s.end - s.start), s.final,
         (title + ' #shorts').slice(0, 100), description, JSON.stringify([...tags.slice(0, 10), 'shorts']), '', status, settings.privacy, Date.now());
       created.push(Number(r.lastInsertRowid)); done++;
@@ -201,7 +259,7 @@ async function uploadClip(c) {
   try {
     let vid = null, lastErr;
     for (let attempt = 0; attempt < 3 && !vid; attempt++) {
-      try { vid = await yt.upload({ file: c.file, title: c.title, description: c.description, tags: c.tags, privacy: c.privacy || settings.privacy, language: settings.language }); }
+      try { vid = await yt.upload({ file: c.file, title: c.title, description: c.description, tags: c.tags, privacy: c.privacy || settings.privacy, language: settings.language, categoryId: c.category || '24' }); }
       catch (e) { lastErr = e; if (/quota/i.test(e.message)) break; await sleep(5000 * (attempt + 1)); }
     }
     if (!vid) throw lastErr;
@@ -317,4 +375,4 @@ function start() {
   every(3 * 3600000, refreshStats);
 }
 
-module.exports = { COOKIES, start, addJob, addSource, checkSources, scheduleClip, refreshStats, announceClip, chooseMoments, normalizeSourceUrl, kick };
+module.exports = { COOKIES, saveCookies, start, addJob, addSource, checkSources, scheduleClip, refreshStats, announceClip, chooseMoments, normalizeSourceUrl, kick };

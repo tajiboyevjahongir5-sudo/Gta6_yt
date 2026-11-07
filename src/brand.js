@@ -28,15 +28,23 @@ const SCHEMA = {
   },
 };
 
+// what the channel posts: the owner's topic, or the subjects the AI found in the processed videos
+function topic(s) {
+  if (s.game) return s.game;
+  const subs = db.prepare("SELECT meta FROM jobs WHERE meta IS NOT NULL ORDER BY id DESC LIMIT 20").all()
+    .map((r) => { try { return JSON.parse(r.meta).subject; } catch (e) { return null; } }).filter(Boolean);
+  const top = Object.entries(subs.reduce((a, x) => ((a[x] = (a[x] || 0) + 1), a), {})).sort((a, b) => b[1] - a[1])[0];
+  return top ? top[0] : 'Gaming';
+}
 function templateKit(s) {
-  const g = s.game, base = s.channelName && s.channelName !== 'Lahza' ? s.channelName : `${g.replace(/\s+/g, '')} Moments`;
+  const g = topic(s), base = s.channelName && s.channelName !== 'Lahza' ? s.channelName : `${g.replace(/\s+/g, '')} Moments`;
   const slug = base.replace(/[^A-Za-z0-9]/g, '');
   return {
-    names: [base, `${g} Highlights`, `${g} Daily`, `Vice City Clips`, `${g} Madness`],
-    handles: [slug, `${slug}Daily`, `${g.replace(/\s+/g, '')}Highlights`, 'ViceCityClips', `${g.replace(/\s+/g, '')}Madness`].map((h) => h.slice(0, 30)),
+    names: [base, `${g} Highlights`, `${g} Daily`, `${g} Clips`, `${g} Madness`],
+    handles: [slug, `${slug}Daily`, `${g.replace(/\s+/g, '')}Highlights`, `${g.replace(/\s+/g, '')}Clips`, `${g.replace(/\s+/g, '')}Madness`].map((h) => h.replace(/[^A-Za-z0-9._-]/g, '').slice(0, 30)),
     description: `The funniest, wildest and most epic ${g} moments from the biggest streams — cut, edited and uploaded every day.\n\n` +
-      `🎬 Highlight compilations\n📱 Daily Shorts\n🔥 Fails, chases, heists and pure chaos in Vice City\n\nNew videos every day. Subscribe so you don't miss the best ${g} clips!`,
-    keywords: [g, 'GTA VI', `${g} funny moments`, `${g} highlights`, `${g} gameplay`, 'Vice City', 'GTA clips', 'gaming highlights', 'funny gaming moments', 'GTA shorts'],
+      `🎬 Highlight compilations\n📱 Daily Shorts\n🔥 The funniest, wildest and most epic moments\n\nNew videos every day. Subscribe so you don't miss the best ${g} clips!`,
+    keywords: [g, `${g} funny moments`, `${g} highlights`, `${g} best moments`, `${g} clips`, 'highlights', 'best moments', 'funny moments', 'shorts'],
     tagline: `Best ${g} moments, every day`,
     logo_text: base.split(/\s+/).filter(Boolean).map((w) => w[0].toUpperCase()).slice(0, 2).join('') || 'L',
     banner_title: base.toUpperCase().slice(0, 22),
@@ -52,9 +60,9 @@ async function aiKit(s, hint) {
       betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default',
       output_config: { effort: 'medium', format: { type: 'json_schema', schema: SCHEMA } },
       messages: [{ role: 'user', content:
-        `Create a YouTube channel brand for a channel that posts ${s.game} stream highlights: long compilations and Shorts ` +
+        `Create a YouTube channel brand for a channel that posts ${topic(s)} highlights from long videos and streams: long compilations and Shorts ` +
         `(funny moments, chases, fails, epic plays). Audience: worldwide, English. ` +
-        `Avoid using "Rockstar" or the exact official game logo wording as the channel name so it isn't confused with an official channel.` +
+        `Don't use official brand or company names as the channel name so it isn't confused with an official channel.` +
         (hint ? `\nOwner's wishes: ${hint}` : '') + `\nWrite everything in ${ai.LANG[s.language] || 'English'}.` }],
     });
     if (res.stop_reason === 'refusal') return null;

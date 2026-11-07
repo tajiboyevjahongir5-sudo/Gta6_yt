@@ -63,7 +63,7 @@ async function startPolling(handlers) {
   try {
     await call('setMyCommands', { commands: [
       { command: 'start', description: 'Boshqaruv paneli' }, { command: 'navbat', description: 'Ishlanayotgan videolar' },
-      { command: 'kliplar', description: 'Tasdiq kutayotgan kliplar' }, { command: 'stat', description: 'Kanal statistikasi' },
+      { command: 'kliplar', description: 'Tasdiq kutayotgan kliplar' }, { command: 'stat', description: 'Kanal statistikasi' }, { command: 'cookies', description: 'YouTube cookies yuborish' },
       { command: 'yordam', description: 'Qanday ishlaydi' }] });
     if (PUBLIC_URL.startsWith('https://')) await call('setChatMenuButton', { menu_button: { type: 'web_app', text: 'Panel', web_app: { url: PUBLIC_URL + '/' } } });
   } catch (e) { log(e.message, 'warn'); }
@@ -87,7 +87,13 @@ async function handleUpdate(u, h) {
     const text = await h.onCallback(cq.data, cq);
     return call('answerCallbackQuery', { callback_query_id: cq.id, text: (text || 'OK').slice(0, 190) });
   }
-  const m = u.message; if (!m || !m.text) return;
+  const m = u.message; if (!m) return;
+  if (m.document) {
+    if (!isAdmin(m.from.id)) return call('sendMessage', { chat_id: m.chat.id, text: 'Ruxsat yo\'q' });
+    const out = await h.onDocument(m.document);
+    return call('sendMessage', { chat_id: m.chat.id, text: out, parse_mode: 'HTML' });
+  }
+  if (!m.text) return;
   const chat = m.chat.id, text = m.text.trim();
   if (!admins().length && text.startsWith('/start')) { setSecret('owner', m.from.id); log(`Bot egasi: ${m.from.id}`); }
   if (!isAdmin(m.from.id)) return call('sendMessage', { chat_id: chat, text: `Bu shaxsiy bot. Sizning ID: ${m.from.id}` });
@@ -99,4 +105,11 @@ async function handleUpdate(u, h) {
   if (out) await reply(out.text || out, out.extra || {});
 }
 
-module.exports = { enabled, call, verifyInitData, isAdmin, admins, notifyAdmins, sendPhotoToAdmins, startPolling, webAppButton, escHtml };
+async function downloadFile(fileId) {
+  const f = await call('getFile', { file_id: fileId });
+  const r = await fetch(`https://api.telegram.org/file/bot${BOT_TOKEN}/${f.file_path}`);
+  if (!r.ok) throw new Error('Faylni yuklab bo\'lmadi');
+  return r.text();
+}
+
+module.exports = { downloadFile, enabled, call, verifyInitData, isAdmin, admins, notifyAdmins, sendPhotoToAdmins, startPolling, webAppButton, escHtml };

@@ -28,6 +28,9 @@ CREATE TABLE IF NOT EXISTS channel_daily (day TEXT PRIMARY KEY, subscribers INTE
 CREATE TABLE IF NOT EXISTS logs (id INTEGER PRIMARY KEY, ts INTEGER, level TEXT, msg TEXT);
 `);
 
+// columns added after the first release
+for (const sql of ['ALTER TABLE jobs ADD COLUMN meta TEXT', 'ALTER TABLE clips ADD COLUMN category TEXT']) { try { db.exec(sql); } catch (e) { /* already there */ } }
+
 const DEFAULTS = {
   autoPublish: false,          // false: each clip waits for your approval in the bot / web app
   privacy: 'public',           // public | unlisted | private
@@ -41,10 +44,10 @@ const DEFAULTS = {
   clipBefore: 12, clipAfter: 8, // seconds kept around each peak
   quality: 720,                // download height (720 is fast, 1080 looks better)
   language: 'en',              // video language: titles, descriptions, tags, subtitles (en = speech translated to English)
-  game: 'GTA 6',
+  game: '',                    // topic hint for the AI ('' = detect from each video)
   channelName: 'Lahza',
-  defaultTags: ['GTA 6', 'GTA VI', 'GTA 6 gameplay', 'GTA 6 funny moments', 'GTA 6 highlights'],
-  descriptionFooter: '🔔 Subscribe for the best GTA 6 moments every day!\n#GTA6 #GTAVI #gaming',
+  defaultTags: ['highlights', 'best moments'],
+  descriptionFooter: '🔔 Subscribe for the best moments every day!',
   accent: '#FFD400',           // thumbnail text colour
   keepSource: false,           // delete downloaded stream after rendering
   useAI: true,
@@ -78,7 +81,7 @@ const parseClip = (c) => c && ({ ...c, tags: JSON.parse(c.tags || '[]'), segment
 const updateRow = (table, id, patch) => {
   const keys = Object.keys(patch); if (!keys.length) return;
   db.prepare(`UPDATE ${table} SET ${keys.map((k) => k + ' = ?').join(', ')} WHERE id = ?`)
-    .run(...keys.map((k) => (patch[k] !== null && typeof patch[k] === 'object' ? JSON.stringify(patch[k]) : patch[k])), id);
+    .run(...keys.map((k) => (patch[k] === undefined ? null : patch[k] !== null && typeof patch[k] === 'object' ? JSON.stringify(patch[k]) : patch[k])), id);
 };
 
 module.exports = { db, DEFAULTS, getSettings, setSettings, getSecret, setSecret, log, parseClip, updateRow };

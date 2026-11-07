@@ -88,12 +88,12 @@ async function channelInfo(refresh = false) {
 }
 
 // resumable upload: one session, file streamed in a single PUT (retried by the caller on failure)
-async function upload({ file, title, description, tags, privacy = 'public', publishAt, language = 'uz' }) {
+async function upload({ file, title, description, tags, privacy = 'public', publishAt, language = 'en', categoryId = '24' }) {
   const size = fs.statSync(file).size;
   const status = { privacyStatus: publishAt ? 'private' : privacy, selfDeclaredMadeForKids: false, embeddable: true };
   if (publishAt) status.publishAt = new Date(publishAt).toISOString();
   const meta = { snippet: { title: title.slice(0, 100), description: description.slice(0, 4900), tags: fitTags(tags),
-    categoryId: '20', defaultLanguage: language, defaultAudioLanguage: language }, status };
+    categoryId: String(categoryId), defaultLanguage: language, defaultAudioLanguage: language }, status };
   const init = await fetch('https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status', {
     method: 'POST', body: JSON.stringify(meta),
     headers: { authorization: 'Bearer ' + (await accessToken()), 'content-type': 'application/json; charset=UTF-8',
