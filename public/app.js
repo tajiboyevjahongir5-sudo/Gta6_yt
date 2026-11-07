@@ -277,6 +277,7 @@ async function settings() {
         ${o.youtube.configured ? '<p class="small" style="margin:8px 0 0"><a href="#" id="ytsetup" style="color:var(--muted)">Google kalitlarini o\'zgartirish</a></p>' : ''}`}</div>
     ${o.youtube.connected && !o.youtube.canBrand ? '<div class="warnbox">Brendni kanalga o\'rnatish uchun kanalni qayta ulang (yangi ruxsat kerak). <a href="#" id="reconn" style="color:inherit">Qayta ulash</a></div>' : ''}
     <div class="card"><div class="row"><div style="font-size:28px">🎨</div><div class="grow"><b>Kanal brendi</b><div class="muted small">Nom, username, tavsif, banner va logo</div></div><button class="btn sm" id="brandBtn">Ochish</button></div></div>
+    <div class="card"><div class="row"><div style="font-size:28px">🍪</div><div class="grow"><b>YouTube cookies</b><div class="muted small" id="ckState">…</div></div><button class="btn sm" id="ckBtn">Sozlash</button></div></div>
     <h2>Nashr qilish</h2>
     <div class="card">
       ${sw('autoPublish', 'Avto-nashr', 'Yoqilsa, tasdiqlashsiz jadval bo\'yicha yuklanadi')}
@@ -318,6 +319,8 @@ async function settings() {
   if ($('#yton')) $('#yton').onclick = connectYouTube;
   if ($('#ytsetup')) $('#ytsetup').onclick = async (e) => { e.preventDefault(); openYtSetup(await api('/api/youtube/setup')); };
   if ($('#brandBtn')) $('#brandBtn').onclick = openBrand;
+  api('/api/cookies').then((c) => { if ($('#ckState')) $('#ckState').textContent = c.has ? `✅ Yuklangan (${new Date(c.updated).toLocaleDateString('uz-UZ')})` : '18+ va "bot emasman" tekshiruvli videolar uchun kerak'; });
+  if ($('#ckBtn')) $('#ckBtn').onclick = openCookies;
   if ($('#reconn')) $('#reconn').onclick = (e) => { e.preventDefault(); connectYouTube(); };
   if ($('#ytoff')) $('#ytoff').onclick = async () => { if (confirm('Kanal uzilsinmi?')) { await api('/api/youtube/disconnect', { method: 'POST' }); settings(); } };
 }
@@ -403,6 +406,28 @@ async function openBrand() {
       catch (er) { toast(er.message); e.target.disabled = false; e.target.textContent = '⬆️ Qayta urinish'; } };
   };
   draw(); $('#sheet').classList.remove('hidden');
+}
+
+function openCookies() {
+  $('#sheetBody').innerHTML = `<div class="row" style="margin-bottom:6px"><b class="grow">🍪 YouTube cookies</b><button class="icon" id="x">✕</button></div>
+    <p class="small muted">YouTube 18+ videolarni va serverdan kelgan so'rovlarni faqat akkauntga kirgan holda beradi. Cookies — sizning YouTube'ga kirganingizni bildiruvchi fayl.</p>
+    <div class="warnbox">Asosiy akkauntingizni emas, <b>alohida (ikkinchi) Google akkaunt</b> ishlating — yoshi 18+ bo'lsin. Bu fayl parol kabi: hech kimga bermang.</div>
+    <div class="card small"><b>Qanday olinadi (kompyuterda, 2 daqiqa):</b>
+      <ol style="padding-left:18px;margin:6px 0" class="muted">
+        <li>Chrome'ga <b>"Get cookies.txt LOCALLY"</b> kengaytmasini o'rnating</li>
+        <li>Inkognito oynada youtube.com ga ikkinchi akkaunt bilan kiring</li>
+        <li>Kengaytmani bosing → <b>Export</b> (Netscape format) → fayl yuklanadi</li>
+        <li>Inkognito oynani <b>yoping</b> (chiqib ketmang — "Sign out" cookies'ni bekor qiladi)</li>
+        <li>Faylni shu yerga yuklang</li></ol></div>
+    <label class="f">cookies.txt fayli</label><input type="file" id="ckFile" accept=".txt,text/plain">
+    <label class="f">yoki matnini qo'ying</label><textarea id="ckText" style="min-height:90px;font-size:11px" placeholder="# Netscape HTTP Cookie File ..."></textarea>
+    <div class="row" style="margin-top:10px"><button class="btn primary grow" id="ckSave">Saqlash</button><button class="btn danger" id="ckDel">O'chirish</button></div>`;
+  $('#sheet').classList.remove('hidden'); $('#x').onclick = closeSheet;
+  $('#ckFile').onchange = async (e) => { const f = e.target.files[0]; if (f) $('#ckText').value = await f.text(); };
+  $('#ckSave').onclick = async (e) => { e.target.disabled = true;
+    try { const r = await api('/api/cookies', { method: 'POST', body: { text: $('#ckText').value } }); toast(`✅ Saqlandi (${r.count} ta). Navbatda xato bergan videoni "Qayta urinish" qiling`); closeSheet(); settings(); }
+    catch (er) { toast(er.message); e.target.disabled = false; } };
+  $('#ckDel').onclick = async () => { await api('/api/cookies', { method: 'DELETE' }); toast('O\'chirildi'); closeSheet(); settings(); };
 }
 
 (async () => { try { if (!token) await login(); go('home'); } catch (e) { showLogin(e.message); } })();

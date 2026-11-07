@@ -30,7 +30,7 @@ const send = (res, code, data, headers = {}) => {
   res.writeHead(code, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', ...headers });
   res.end(JSON.stringify(data));
 };
-const readBody = (req) => new Promise((resolve) => { let b = ''; req.on('data', (c) => { b += c; if (b.length > 1e6) req.destroy(); });
+const readBody = (req) => new Promise((resolve) => { let b = ''; req.on('data', (c) => { b += c; if (b.length > 3e6) req.destroy(); });
   req.on('end', () => { try { resolve(b ? JSON.parse(b) : {}); } catch (e) { resolve({}); } }); });
 
 function serveFile(req, res, file, type) {
@@ -193,6 +193,21 @@ async function api(req, res, url) {
       return send(res, 200, { ok: true, studio: `https://studio.youtube.com/channel/${id}/editing/profile` });
     } catch (e) { return send(res, 400, { error: e.message }); }
   }
+  if (p === '/api/cookies' && m === 'GET') {
+    const f = pipeline.COOKIES; const has = fs.existsSync(f);
+    return send(res, 200, { has, updated: has ? fs.statSync(f).mtimeMs : null });
+  }
+  if (p === '/api/cookies' && m === 'POST') {
+    const text = String(b.text || '').replace(/\r/g, '');
+    // Netscape cookies.txt: tab-separated lines; must contain YouTube/Google login cookies
+    const lines = text.split('\n').filter((l) => l.split('\t').length >= 7);
+    if (!lines.length) return send(res, 400, { error: 'Bu cookies.txt emas. "Get cookies.txt LOCALLY" kengaytmasi bilan Netscape formatida eksport qiling' });
+    if (!lines.some((l) => /youtube\.com|google\.com/.test(l))) return send(res, 400, { error: 'Faylda youtube.com cookies yo\'q. YouTube sahifasida turib eksport qiling' });
+    fs.writeFileSync(pipeline.COOKIES, (text.startsWith('# Netscape') ? '' : '# Netscape HTTP Cookie File\n') + text, { mode: 0o600 });
+    log(`YouTube cookies yuklandi (${lines.length} ta)`);
+    return send(res, 200, { has: true, updated: Date.now(), count: lines.length });
+  }
+  if (p === '/api/cookies' && m === 'DELETE') { fs.rmSync(pipeline.COOKIES, { force: true }); return send(res, 200, { has: false }); }
   if (p === '/api/youtube/setup' && m === 'GET') return send(res, 200, yt.setupInfo());
   if (p === '/api/youtube/setup' && m === 'POST') {
     try { yt.setCreds(b.clientId, b.clientSecret); log('Google OAuth client saqlandi'); return send(res, 200, yt.setupInfo()); }

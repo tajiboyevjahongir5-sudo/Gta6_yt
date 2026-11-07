@@ -2,7 +2,27 @@
 const fs = require('fs');
 const path = require('path');
 const { db, getSettings, log, parseClip, updateRow } = require('./db');
-const { WORK_DIR, OUT_DIR, YTDLP } = require('./config');
+const { WORK_DIR, OUT_DIR, YTDLP, DATA_DIR } = require('./config');
+// YouTube cookies (Netscape cookies.txt) uploaded in the web app: needed for age-restricted videos and when
+// YouTube asks servers to "sign in to confirm you're not a bot"
+const COOKIES = path.join(DATA_DIR, 'cookies.txt');
+// yt-dlp rewrites the cookie file it is given, so it gets a copy and the uploaded file stays intact
+function ytArgs() {
+  if (!fs.existsSync(COOKIES)) return [];
+  const copy = path.join(DATA_DIR, 'cookies.run.txt'); fs.copyFileSync(COOKIES, copy);
+  return ['--cookies', copy];
+}
+// turn yt-dlp's long English errors into something actionable
+function explainYtdlp(e) {
+  const m = e.message;
+  if (/confirm your age|age-restricted|Sign in to confirm|not a bot|cookies/i.test(m))
+    return new Error(fs.existsSync(COOKIES)
+      ? 'YouTube kirishni talab qildi, cookies eskirgan bo\'lishi mumkin: Sozlamalar → 🍪 YouTube cookies ni yangilang'
+      : 'YouTube kirishni talab qilyapti (18+ video yoki bot tekshiruvi): Sozlamalar → 🍪 YouTube cookies ni yuklang, keyin "Qayta urinish"');
+  if (/Private video|members-only|Join this channel/i.test(m)) return new Error('Video yopiq yoki faqat a\'zolar uchun');
+  if (/is not available|Video unavailable/i.test(m)) return new Error('Video mavjud emas yoki o\'chirilgan');
+  return e;
+}
 const { run, sleep, fmtTime, dayKey, TZ_OFFSET } = require('./util');
 const { findHighlights } = require('./analyze');
 const render = require('./render');
@@ -28,17 +48,17 @@ function addJob(url, sourceId = null, meta = {}) {
 const setJob = (id, patch) => updateRow('jobs', id, { ...patch, updated_at: Date.now() });
 
 async function download(job, dir, quality) {
-  const { out } = await run(YTDLP, ['--dump-single-json', '--no-playlist', '--no-warnings', job.url], { timeoutMs: 120000 });
+  const { out } = await run(YTDLP, [...ytArgs(), '--dump-single-json', '--no-playlist', '--no-warnings', job.url], { timeoutMs: 120000 }).catch((e) => { throw explainYtdlp(e); });
   const meta = JSON.parse(out);
   if (meta.is_live || meta.live_status === 'is_live' || meta.live_status === 'is_upcoming') {
     const e = new Error('Efir hali tugamagan — tugagach avtomatik qayta urinadi'); e.waitLive = true; throw e; }
   setJob(job.id, { title: meta.title, author: meta.uploader || meta.channel, author_url: meta.uploader_url || meta.channel_url,
     video_id: meta.id, duration: meta.duration || null });
   const tmpl = path.join(dir, 'source.%(ext)s');
-  await run(YTDLP, ['-f', `bv*[height<=${quality}][ext=mp4]+ba[ext=m4a]/bv*[height<=${quality}]+ba/b[height<=${quality}]/b`,
+  await run(YTDLP, [...ytArgs(), '-f', `bv*[height<=${quality}][ext=mp4]+ba[ext=m4a]/bv*[height<=${quality}]+ba/b[height<=${quality}]/b`,
     '--merge-output-format', 'mp4', '--no-playlist', '--no-part', '--concurrent-fragments', '4', '--newline', '-o', tmpl, job.url], {
     onLine: (l) => { const m = l.match(/\[download\]\s+([\d.]+)%/); if (m) setJob(job.id, { progress: Number(m[1]) / 100 }); },
-  });
+  }).catch((e) => { throw explainYtdlp(e); });
   const file = fs.readdirSync(dir).find((f) => f.startsWith('source.') && !f.endsWith('.part') && !f.endsWith('.ytdl'));
   if (!file) throw new Error('Video yuklab olinmadi');
   return { file: path.join(dir, file), meta };
@@ -222,7 +242,7 @@ function normalizeSourceUrl(url) {
   return url;
 }
 async function listSourceVideos(url) {
-  const { out } = await run(YTDLP, ['--flat-playlist', '-I', '1:10', '-J', '--no-warnings', url], { timeoutMs: 120000 });
+  const { out } = await run(YTDLP, [...ytArgs(), '--flat-playlist', '-I', '1:10', '-J', '--no-warnings', url], { timeoutMs: 120000 }).catch((e) => { throw explainYtdlp(e); });
   const j = JSON.parse(out);
   return { name: j.channel || j.uploader || j.title, entries: (j.entries || []).map((e) => ({ id: e.id, title: e.title || '', duration: e.duration || null,
     url: e.url && /^https?:/.test(e.url) ? e.url : (e.webpage_url || (url.includes('youtube') ? 'https://www.youtube.com/watch?v=' + e.id : e.url)),
@@ -297,4 +317,4 @@ function start() {
   every(3 * 3600000, refreshStats);
 }
 
-module.exports = { start, addJob, addSource, checkSources, scheduleClip, refreshStats, announceClip, chooseMoments, normalizeSourceUrl, kick };
+module.exports = { COOKIES, start, addJob, addSource, checkSources, scheduleClip, refreshStats, announceClip, chooseMoments, normalizeSourceUrl, kick };
