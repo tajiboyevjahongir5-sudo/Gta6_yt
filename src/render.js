@@ -181,12 +181,12 @@ async function renderShortRaw(src, seg, out, workDir, { words = [], accent = '#F
   if (facecam) {
     // streamer layout (like popular gaming Shorts): webcam on top, a thin accent line, gameplay filling the rest
     const c = facecamCrops(facecam);
-    fc = `[0:v]split[a][b];[a]crop=${c.cam.w}:${c.cam.h}:${c.cam.x}:${c.cam.y},scale=1080:${CAM_H}:flags=lanczos,setsar=1[cam];` +
+    fc = `[0:v]fps=${FPS},split[a][b];[a]crop=${c.cam.w}:${c.cam.h}:${c.cam.x}:${c.cam.y},scale=1080:${CAM_H}:flags=lanczos,setsar=1[cam];` +
       `[b]crop=${c.game.w}:${c.game.h}:${c.game.x}:0,scale=1080:${GAME_H}:flags=lanczos,setsar=1${zf(1080, GAME_H)}[game];` +
       `[cam][game]vstack,drawbox=x=0:y=${CAM_H - 4}:w=1080:h=8:color=${accent.replace('#', '0x')}:t=fill,fps=${FPS},fade=t=in:st=0:d=0.25[v0];`;
     emojiArea = { x: 70, y: CAM_H + 40, w: 800, h: 520, size: 300 };
   } else {
-    fc = `[0:v]split[a][b];[a]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,boxblur=25:2,eq=brightness=-0.15[bg];` +
+    fc = `[0:v]fps=${FPS},split[a][b];[a]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,boxblur=25:2,eq=brightness=-0.15[bg];` +
       `[b]scale=-2:${band},crop=1080:${band}${zf(1080, band)}[fg];[bg][fg]overlay=(W-w)/2:${bandY}:shortest=1,fps=${FPS},fade=t=in:st=0:d=0.25[v0];`;
   }
   const au = await audioSource(src, dur);
