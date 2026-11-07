@@ -87,36 +87,33 @@ async function concat(parts, out, workDir) {
 
 // 6 s end card: blurred last frame, channel logo, thanks + subscribe, ding, fade to black.
 // Long enough for a YouTube end screen (added in Studio).
-async function renderOutro(lastPart, out, workDir, { channel = '', topic = '', language = 'en', accent = '#FFD400', logo = null } = {}) {
+async function renderOutro(lastPart, out, workDir, { channel = '', topic = '', language = 'en', accent = '#FFD400', logo = null, custom = false, key } = {}) {
   const T = END_TEXT[language] || END_TEXT.en; const D = 6;
   const frame = path.join(workDir, 'outro_bg.png');
   await run(FFMPEG, ['-y', '-hide_banner', '-loglevel', 'error', '-sseof', '-0.6', '-i', lastPart, '-frames:v', '1', '-update', '1', frame]);
   const t1 = textFile(workDir, 'outro1.txt', T.thanks);
   const t2 = textFile(workDir, 'outro2.txt', topic ? `${T.sub} ${String(topic).toUpperCase()}`.slice(0, 48) : T.sub);
-  const t3 = textFile(workDir, 'outro3.txt', channel || ' ');
   const ac = accent.replace('#', '0x');
-  const ding = await fx.sfx('ding').catch(() => null);
   const inputs = ['-loop', '1', '-framerate', String(FPS), '-t', String(D), '-i', frame];
   if (logo) inputs.push('-loop', '1', '-framerate', String(FPS), '-t', String(D), '-i', logo);
   inputs.push('-f', 'lavfi', '-t', String(D), '-i', 'anullsrc=r=48000:cl=stereo');
-  if (ding) inputs.push('-i', ding);
-  const li = 1, ai = logo ? 2 : 1, di = ai + 1;
-  const textY = logo ? 560 : 420;
-  let fc = `[0:v]scale=1920:1080,boxblur=22:3,eq=brightness=-0.28:saturation=0.8,setsar=1,format=yuv420p[bg];`;
+  const li = 1, ai = logo ? 2 : 1;
+  let fc = `[0:v]scale=1920:1080,boxblur=22:3,eq=brightness=-0.3:saturation=0.8,setsar=1,format=yuv420p[bg];`;
   let v = 'bg';
   if (logo) {
-    fc += `[${li}:v]scale=260:260,format=rgba,geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='if(lt(hypot(X-130,Y-130),128),alpha(X,Y),0)',fade=t=in:st=0.2:d=0.5:alpha=1[lg];` +
-      `[bg][lg]overlay=(W-w)/2:200:shortest=1[v1];`;
+    fc += `[${li}:v]scale=200:200,format=rgba,geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='if(lt(hypot(X-100,Y-100),98),alpha(X,Y),0)',fade=t=in:st=0.2:d=0.5:alpha=1[lg];` +
+      `[bg][lg]overlay=(W-w)/2:90:shortest=1[v1];`;
     v = 'v1';
   }
   const fadeIn = (st) => `alpha='if(lt(t,${st}),0,min(1,(t-${st})/0.4))'`;
-  fc += `[${v}]drawtext=${fontOpt()}textfile='${esc(t1)}':fontsize=104:fontcolor=white:borderw=6:bordercolor=black:x=(w-text_w)/2:y=${textY}:${fadeIn(0.5)},` +
-    `drawtext=${fontOpt()}textfile='${esc(t2)}':fontsize=54:fontcolor=${ac}:borderw=4:bordercolor=black:x=(w-text_w)/2:y=${textY + 150}:${fadeIn(0.9)},` +
-    `drawtext=${fontOpt()}textfile='${esc(t3)}':fontsize=44:fontcolor=white@0.85:x=(w-text_w)/2:y=${textY + 240}:${fadeIn(1.2)},` +
-    `fade=t=in:st=0:d=0.4,fade=t=out:st=${D - 0.8}:d=0.8,fps=${FPS},format=yuv420p[vo];`;
-  fc += ding ? `[${di}:a]aresample=48000,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,volume=0.45,adelay=500|500[dg];[${ai}:a][dg]amix=inputs=2:normalize=0:duration=first,afade=t=out:st=${D - 0.8}:d=0.8[ao]`
-    : `[${ai}:a]anull[ao]`;
-  await run(FFMPEG, ['-y', '-hide_banner', '-loglevel', 'error', ...inputs, '-filter_complex', fc, '-map', '[vo]', '-map', '[ao]', '-t', String(D),
+  fc += `[${v}]drawtext=${fontOpt()}textfile='${esc(t1)}':fontsize=96:fontcolor=white:borderw=6:bordercolor=black:x=(w-text_w)/2:y=${logo ? 330 : 250}:${fadeIn(0.3)},` +
+    `drawtext=${fontOpt()}textfile='${esc(t2)}':fontsize=48:fontcolor=${ac}:borderw=4:bordercolor=black:x=(w-text_w)/2:y=${logo ? 450 : 370}:${fadeIn(0.6)}[vt]`;
+  // animated subscribe card (or the owner's green screen) under the text, with its click/ding sounds
+  const events = await fx.subscribeEvents(0.9, 460, logo ? 560 : 500, { language, channel, logo, custom, key });
+  const g = await fx.buildGraph(events, { vIn: 'vt', aIn: 'an', firstIdx: ai + 1 });
+  fc += `;[${ai}:a]anull[an]` + (g.filter ? ';' + g.filter : '') +
+    `;[${g.vOut}]fade=t=in:st=0:d=0.4,fade=t=out:st=${D - 0.8}:d=0.8,fps=${FPS},format=yuv420p[vo];[${g.aOut}]afade=t=out:st=${D - 0.8}:d=0.8[ao]`;
+  await run(FFMPEG, ['-y', '-hide_banner', '-loglevel', 'error', ...inputs, ...g.inputs, '-filter_complex', fc, '-map', '[vo]', '-map', '[ao]', '-t', String(D),
     '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '160k', '-ac', '2', '-ar', '48000', out]);
 }
 
@@ -192,9 +189,13 @@ async function renderShortRaw(src, seg, out, workDir, { words = [], accent = '#F
   const au = await audioSource(src, dur);
   fc += `[${au.label}]aresample=48000,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[a0]`;
   let v = 'v0', a = 'a0', inputs = [];
-  if (effects) {
-    const events = fx.planEvents({ dur, peakT: (seg.peak ?? seg.start + dur / 2) - seg.start, peakEmoji: emoji || '😱', words, emojis, endDing: !!endCard,
-      area: emojiArea });
+  // end card: the subscribe animation over the last 3.4 s (inside the safe area, above the subtitles)
+  const cardT = endCard && dur >= 9 ? dur - 3.4 : null;
+  const cardEvents = cardT !== null ? await fx.subscribeEvents(cardT, 40, (facecam ? CAM_H : 0) + 150, endCard) : [];
+  if (cardEvents.length) { fc += `;[v0]drawbox=x=0:y=0:w=iw:h=ih:color=black@0.3:t=fill:enable='gte(t,${cardT.toFixed(2)})'[vd]`; v = 'vd'; }
+  if (effects || cardEvents.length) {
+    const events = [...(effects ? fx.planEvents({ dur, peakT: (seg.peak ?? seg.start + dur / 2) - seg.start, peakEmoji: emoji || '😱', words, emojis,
+      area: emojiArea }) : []), ...cardEvents];
     const g = await fx.buildGraph(events, { vIn: v, aIn: a, firstIdx: au.next, emojiSize: 300 });
     if (g.filter) fc += ';' + g.filter;
     v = g.vOut; a = g.aOut; inputs = g.inputs;
@@ -203,16 +204,6 @@ async function renderShortRaw(src, seg, out, workDir, { words = [], accent = '#F
     const ass = path.join(workDir, path.basename(out) + '.ass');
     fs.writeFileSync(ass, buildAss(words, dur, { accent, style }));
     fc += `;[${v}]subtitles=filename='${esc(ass)}'${FONT ? `:fontsdir='${esc(path.dirname(FONT))}'` : ''}[vs]`; v = 'vs';
-  }
-  if (endCard && dur >= 8) {
-    // last 1.5 s: subscribe button + channel name pop in (inside the safe area, above the subtitles)
-    const T = END_TEXT[endCard.language] || END_TEXT.en; const st = (dur - 1.5).toFixed(2);
-    const b1 = textFile(workDir, path.basename(out) + '.sub.txt', T.short), b2 = textFile(workDir, path.basename(out) + '.ch.txt', endCard.channel || ' ');
-    const on = `enable='gte(t,${st})'`;
-    fc += `;[${v}]drawbox=x=0:y=0:w=iw:h=ih:color=black@0.35:t=fill:${on},` +
-      `drawtext=${fontOpt()}textfile='${esc(b1)}':fontsize=76:fontcolor=white:box=1:boxcolor=0xE62117:boxborderw=26:x=(w-text_w)/2:y=880:${on},` +
-      `drawtext=${fontOpt()}textfile='${esc(b2)}':fontsize=46:fontcolor=white:borderw=3:bordercolor=black:x=(w-text_w)/2:y=1030:${on}[ve]`;
-    v = 've';
   }
   fc += `;[${a}]loudnorm=I=-14:TP=-1.5:LRA=11,aresample=48000,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[aout]`;
   await run(FFMPEG, ['-y', '-hide_banner', '-loglevel', 'error', '-ss', String(seg.start), '-t', dur.toFixed(2), '-i', src, ...au.inputs, ...inputs,

@@ -133,6 +133,25 @@ async function api(req, res, url) {
     out.on('error', (e) => send(res, 500, { error: e.message }));
     return;
   }
+  // the owner's green-screen "subscribe" video (raw upload)
+  if (p === '/api/subscribe-gs' && m === 'PUT') {
+    const fxm = require('./src/fx'); fs.mkdirSync(path.dirname(fxm.GS_FILE), { recursive: true });
+    const tmp = fxm.GS_FILE + '.upload';
+    const outS = fs.createWriteStream(tmp); req.pipe(outS);
+    outS.on('finish', async () => {
+      try {
+        // normalise to mp4 30 fps, max 1080 wide, max 8 s
+        await run(cfg.FFMPEG, ['-y', '-hide_banner', '-loglevel', 'error', '-i', tmp, '-t', '8', '-vf', 'scale=\'min(1080,iw)\':-2,fps=30', '-c:v', 'libx264', '-preset', 'veryfast',
+          '-crf', '18', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-ar', '48000', '-ac', '2', fxm.GS_FILE]);
+        setSettings({ subscribeCustom: true }); log('Obuna green screen videosi yuklandi');
+        send(res, 200, { ok: true });
+      } catch (e) { send(res, 400, { error: 'Video o\'qilmadi: ' + e.message.slice(0, 150) }); }
+      finally { fs.rmSync(tmp, { force: true }); }
+    });
+    return;
+  }
+  if (p === '/api/subscribe-gs' && m === 'DELETE') { fs.rmSync(require('./src/fx').GS_FILE, { force: true }); setSettings({ subscribeCustom: false }); return send(res, 200, { ok: true }); }
+  if (p === '/api/subscribe-gs' && m === 'GET') return send(res, 200, { has: fs.existsSync(require('./src/fx').GS_FILE) });
   const b = ['POST', 'PATCH', 'PUT'].includes(m) ? await readBody(req) : {};
   let mm;
 

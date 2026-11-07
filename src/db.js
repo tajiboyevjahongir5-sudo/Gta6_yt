@@ -63,7 +63,9 @@ const DEFAULTS = {
   effects: true,               // sound effects (whoosh, boom, pop)
   emojis: false,               // animated emoji reactions on top of the video
   zoom: true,                  // punch-in zoom on the key moment
-  outro: true,                 // end card: 6 s outro on compilations, subscribe pop-up at the end of Shorts
+  outro: true,                 // end card: 6 s outro on compilations, subscribe animation at the end of Shorts
+  subscribeCustom: false,      // use the owner's own green-screen subscribe video (uploaded in the panel)
+  gsKey: '#00FF00',            // its background colour to key out
   facecamLayout: true,         // streamer webcam detected -> Shorts with the webcam on top, gameplay below
 };
 function getSettings() {

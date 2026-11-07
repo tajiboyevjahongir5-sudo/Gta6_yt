@@ -359,7 +359,13 @@ async function settings() {
       ${sw('facecamLayout', 'Webkamera tepada (Shorts)', 'Videoda streamer kamerasi bo\'lsa: tepada kamera, pastda o\'yin. Kamera bo\'lmasa oddiy ko\'rinish')}
       ${sw('effects', 'Ovoz effektlari', 'Whoosh, boom — eng qiziq joylarda')}
       ${sw('zoom', 'Zoom eng qiziq joyda', 'Kadr keskin yaqinlashadi va silliq qaytadi')}
-      ${sw('outro', 'Chiroyli yakun', 'Videoga 6 s outro (logo, rahmat, obuna), Shorts oxirida obuna tugmasi')}
+      ${sw('outro', 'Chiroyli yakun + obuna animatsiyasi', 'Oxirida: SUBSCRIBE tugmasi bosiladi, qo\'ng\'iroqcha chalinadi (videoga 6 s outro, Shorts oxirgi 3.4 s)')}
+      <div class="card" style="background:var(--s2);margin-top:8px"><b class="small">Obuna animatsiyasi</b>
+        <div class="small muted" id="gsState" style="margin:4px 0 8px">Standart animatsiya (kanal nomi va logosi bilan)</div>
+        <label class="btn sm" style="cursor:pointer">🟩 O'z green screen videoni yuklash<input type="file" id="gsFile" accept="video/*" hidden></label>
+        <button class="btn sm danger hidden" id="gsDel">O'chirish</button>
+        <div class="row" style="margin-top:8px"><span class="small muted grow">Fon rangi (olib tashlanadi)</span><input type="color" data-k="gsKey" value="${esc(s.gsKey || '#00FF00')}" style="width:50px;height:30px;border:0;background:none"></div>
+        <div class="switch" style="border:0;padding:4px 0"><span class="small">Mening videomni ishlatish</span><input type="checkbox" data-k="subscribeCustom" ${s.subscribeCustom ? 'checked' : ''}></div></div>
       ${sw('emojis', 'Animatsion emojilar', 'Video ustida sakraydigan emojilar')}
       ${sw('subtitles', 'Shorts subtitrlari', 'So\'zma-so\'z, pastda, layk/koment tugmalari va tavsifdan chetda')}
       <div class="row"><div class="grow"><label class="f">Subtitr uslubi</label><select data-k="subtitleStyle">${[['pop', "Pop (so'zlar ovozga mos chiqadi)"], ['clean', 'Toza (kursiv, oq)'], ['karaoke', "Karaoke (sariq so'z)"]].map(([v, t]) => `<option value="${v}" ${s.subtitleStyle === v ? 'selected' : ''}>${t}</option>`).join('')}</select></div></div>
@@ -397,6 +403,12 @@ async function settings() {
     e.target.disabled = true; try { await api('/api/ai/gemini', { method: 'POST', body: { key } }); haptic('medium'); toast('✅ Gemini ulandi'); settings(); } catch (er) { toast(er.message); e.target.disabled = false; } };
   api('/api/cookies').then((c) => { if ($('#ckState')) $('#ckState').textContent = c.has ? `✅ Yuklangan (${new Date(c.updated).toLocaleDateString('uz-UZ')})` : '18+ va "bot emasman" tekshiruvli videolar uchun kerak'; });
   if ($('#ckBtn')) $('#ckBtn').onclick = openCookies;
+  api('/api/subscribe-gs').then((g) => { if (!$('#gsState')) return; if (g.has) { $('#gsState').textContent = '✅ Sizning green screen videongiz yuklangan'; $('#gsDel').classList.remove('hidden'); } });
+  $('#gsFile').onchange = (e) => { const f = e.target.files[0]; if (!f) return; toast('Yuklanmoqda…');
+    const x = new XMLHttpRequest(); x.open('PUT', '/api/subscribe-gs'); x.setRequestHeader('authorization', 'Bearer ' + token);
+    x.onload = () => { let j = {}; try { j = JSON.parse(x.responseText); } catch (er) {} if (x.status === 200) { toast('✅ Yuklandi'); settings(); } else toast(j.error || 'Xato'); };
+    x.send(f); };
+  $('#gsDel').onclick = async () => { await api('/api/subscribe-gs', { method: 'DELETE' }); toast('O\'chirildi'); settings(); };
   if ($('#reconn')) $('#reconn').onclick = (e) => { e.preventDefault(); connectYouTube(); };
   if ($('#ytoff')) $('#ytoff').onclick = async () => { if (confirm('Kanal uzilsinmi?')) { await api('/api/youtube/disconnect', { method: 'POST' }); settings(); } };
 }

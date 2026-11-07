@@ -270,8 +270,9 @@ async function processJob(job) {
   let channelName = settings.channelName;
   try { const ch = yt.connected() ? await yt.channelInfo() : null; if (ch?.title) channelName = ch.title; } catch (e) {}
   const brandLogo = path.join(require('./config').DATA_DIR, 'brand', 'logo.png');
-  const outro = settings.outro ? { channel: channelName, topic: video.subject, language: settings.language, accent: settings.accent,
-    logo: fs.existsSync(brandLogo) ? brandLogo : null } : null;
+  const logo = fs.existsSync(brandLogo) ? brandLogo : null;
+  const card = { channel: channelName, language: settings.language, logo, custom: settings.subscribeCustom, key: settings.gsKey };
+  const outro = settings.outro ? { ...card, topic: video.subject, accent: settings.accent } : null;
   setJob(job.id, { status: 'rendering', step: 'Montaj qilinmoqda', progress: 0 });
   const totalSteps = (settings.makeLong ? 1 : 0) + (settings.makeShorts ? Math.min(settings.shortsPerVideo, picked.length) : 0) || 1;
   let done = 0;
@@ -293,7 +294,7 @@ async function processJob(job) {
       const out = path.join(outDir, `short_${i + 1}.mp4`); const thumb = path.join(outDir, `short_${i + 1}.jpg`);
       const words = settings.subtitles ? await subs.transcribe(src, s.start, Math.min(58, s.end - s.start), dir, { model: settings.asrModel, lang: settings.subtitleLang, to: settings.language, context: { title: meta.title || job.title, subject: video.subject } }) : [];
       await render.renderShort(src, s, out, dir, { words, accent: settings.accent, style: settings.subtitleStyle, emoji: s.emoji, effects: settings.effects, emojis: settings.emojis, facecam,
-        zoom: settings.zoom, endCard: settings.outro ? { channel: channelName, language: settings.language } : null });
+        zoom: settings.zoom, endCard: settings.outro ? card : null });
       await render.grabFrame(out, 1.5, thumb, 540);
       const description = [title, '', creditLine(job), '', ['#shorts', ...hashtags].join(' ')].join('\n');
       const r = ins.run(job.id, 'short', out, thumb, JSON.stringify([s]), Math.min(58, s.end - s.start), s.final,

@@ -20,6 +20,8 @@ const SFX = {
   whoosh: ['-f', 'lavfi', '-i', 'anoisesrc=c=pink:a=0.8:d=0.55:r=48000', '-af', "highpass=f=400,lowpass=f=5000,volume='sin(PI*t/0.55)^2':eval=frame,alimiter=limit=0.8"],
   // bubbly pop for emojis
   pop: ['-f', 'lavfi', '-i', "aevalsrc='0.7*sin(2*PI*(1400-1100*t/0.09)*t)*exp(-t*35)':s=48000:d=0.15"],
+  // mouse click: a very short high-passed noise tick
+  click: ['-f', 'lavfi', '-i', 'anoisesrc=c=white:a=0.9:d=0.05:r=48000', '-af', 'highpass=f=1800,lowpass=f=9000,afade=t=out:st=0.004:d=0.04'],
   // bright ding
   ding: ['-f', 'lavfi', '-i', "aevalsrc='0.35*sin(2*PI*1568*t)*exp(-t*4)+0.18*sin(2*PI*3136*t)*exp(-t*6)':s=48000:d=1.1"],
 };
@@ -51,6 +53,34 @@ async function emojiFrames(emoji) {
     else log(`Emoji chizilmadi (${emoji}): ${e.message}`, 'warn');
     return null;
   }
+}
+
+// animated "subscribe" card (button click -> SUBSCRIBED -> bell), cached per text/channel/logo
+const SUB_TEXT = { en: ['SUBSCRIBE', 'SUBSCRIBED'], ru: ['ПОДПИСАТЬСЯ', 'ВЫ ПОДПИСАНЫ'], uz: ["OBUNA BO'LISH", "OBUNA BO'LINDI"] };
+const SUB_SCRIPT = path.join(__dirname, '..', 'scripts', 'subscribe_anim.py');
+async function subscribeAnim({ language = 'en', channel = '', logo = null } = {}) {
+  const [text, done] = SUB_TEXT[language] || SUB_TEXT.en;
+  const key = require('crypto').createHash('md5').update([text, done, channel, logo && fs.existsSync(logo) ? fs.statSync(logo).mtimeMs : ''].join('|')).digest('hex').slice(0, 12);
+  const dir = path.join(DATA_DIR, 'subscribe', key);
+  const meta = path.join(dir, 'meta.json');
+  if (fs.existsSync(meta)) return { dir, ...JSON.parse(fs.readFileSync(meta, 'utf8')) };
+  try {
+    const args = [SUB_SCRIPT, dir, '--text', text, '--done', done, '--channel', channel];
+    if (logo && fs.existsSync(logo)) args.push('--logo', logo);
+    if (require('./config').FONT) args.push('--font', require('./config').FONT);
+    const { out } = await run(PY, args, { timeoutMs: 120000 });
+    fs.writeFileSync(meta, out.trim());
+    return { dir, ...JSON.parse(out) };
+  } catch (e) { log('Obuna animatsiyasi chizilmadi: ' + e.message.slice(0, 200), 'warn'); return null; }
+}
+// the owner's own green-screen subscribe video (uploaded in the panel), if any
+const GS_FILE = path.join(DATA_DIR, 'brand', 'subscribe_gs.mp4');
+// events for the subscribe card starting at t: overlay (+ its own sounds) placed with its top-left at x,y
+async function subscribeEvents(t, x, y, opts) {
+  if (opts.custom && fs.existsSync(GS_FILE)) return [{ t, gs: GS_FILE, x, y, w: 1000, key: String(opts.key || '#00FF00').replace('#', '0x') }];
+  const a = await subscribeAnim(opts); if (!a) return [];
+  return [{ t, frames: a.dir, x, y }, { t: t + a.clicks[0], sfx: 'click', vol: 0.8 }, { t: t + a.clicks[1], sfx: 'click', vol: 0.8 },
+    { t: t + a.clicks[1] + 0.05, sfx: 'ding', vol: 0.35 }];
 }
 
 // words in the (English) subtitles -> emoji reactions
@@ -99,6 +129,18 @@ async function buildGraph(events, { vIn, aIn, firstIdx, emojiSize = 300 }) {
       const canvas = Math.round(emojiSize * 1.6);
       vParts.push(`[${idx}:v]format=rgba,setpts=PTS-STARTPTS+${e.t.toFixed(3)}/TB[em${k}];[${v}][em${k}]overlay=${e.x - (canvas - emojiSize) / 2}:${e.y - (canvas - emojiSize) / 2}:eof_action=pass:format=auto[vx${k}]`);
       v = `vx${k}`; idx++; k++;
+    } else if (e.frames) {
+      // transparent PNG sequence (subscribe card)
+      inputs.push('-reinit_filter', '0', '-framerate', '30', '-i', path.join(e.frames, '%03d.png'));
+      vParts.push(`[${idx}:v]format=rgba,setpts=PTS-STARTPTS+${e.t.toFixed(3)}/TB[ov${k}];[${v}][ov${k}]overlay=${e.x}:${e.y}:eof_action=pass:format=auto[vx${k}]`);
+      v = `vx${k}`; idx++; k++;
+    } else if (e.gs) {
+      // green-screen video: key out the green, keep its own sound
+      inputs.push('-reinit_filter', '0', '-i', e.gs);
+      vParts.push(`[${idx}:v]chromakey=${e.key}:0.16:0.07,format=rgba,scale=${e.w}:-2,setpts=PTS-STARTPTS+${e.t.toFixed(3)}/TB[ov${k}];[${v}][ov${k}]overlay=${e.x}:${e.y}:eof_action=pass:format=auto[vx${k}]`);
+      const ms = Math.max(0, Math.round(e.t * 1000));
+      if (e.audio !== false) { aParts.push(`[${idx}:a]aresample=48000,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,volume=0.8,adelay=${ms}|${ms}[gsa${idx}]`); aLabels.push(`[gsa${idx}]`); }
+      v = `vx${k}`; idx++; k++;
     } else if (e.sfx) {
       try { inputs.push('-reinit_filter', '0', '-i', await sfx(e.sfx)); } catch (err) { log('SFX yaratilmadi: ' + err.message, 'warn'); continue; }
       const ms = Math.max(0, Math.round(e.t * 1000));
@@ -111,4 +153,4 @@ async function buildGraph(events, { vIn, aIn, firstIdx, emojiSize = 300 }) {
   return { inputs, filter: [...vParts, ...aParts].join(';'), vOut: v, aOut: a };
 }
 
-module.exports = { sfx, emojiFrames, emojiForText, planEvents, buildGraph };
+module.exports = { subscribeEvents, subscribeAnim, GS_FILE, sfx, emojiFrames, emojiForText, planEvents, buildGraph };
