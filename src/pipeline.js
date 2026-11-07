@@ -7,12 +7,37 @@ const { WORK_DIR, OUT_DIR, YTDLP, DATA_DIR } = require('./config');
 // YouTube asks servers to "sign in to confirm you're not a bot"
 const COOKIES = path.join(DATA_DIR, 'cookies.txt');
 // yt-dlp rewrites the cookie file it is given, so it gets a copy and the uploaded file stays intact
+const COOKIES_RUN = path.join(DATA_DIR, 'cookies.run.txt');
+const LOGIN_COOKIES = ['SID', '__Secure-1PSID', '__Secure-3PSID', 'LOGIN_INFO', 'SAPISID'];
+const hasLogin = (text) => { const names = new Set(String(text).split('\n').map((l) => l.split('\t')[5])); return LOGIN_COOKIES.some((n) => names.has(n)); };
 function ytArgs() {
   // optional proxy (a residential proxy gets past YouTube's block on data-centre IPs), e.g. http://user:pass@host:port
   const proxy = process.env.YTDLP_PROXY ? ['--proxy', process.env.YTDLP_PROXY] : [];
   if (!fs.existsSync(COOKIES)) return proxy;
-  const copy = path.join(DATA_DIR, 'cookies.run.txt'); fs.copyFileSync(COOKIES, copy);
-  return [...proxy, '--cookies', copy];
+  fs.copyFileSync(COOKIES, COOKIES_RUN);
+  return [...proxy, '--cookies', COOKIES_RUN];
+}
+// YouTube rotates session cookies; yt-dlp writes the new ones into the file it was given. Keep them,
+// otherwise the saved cookies go stale and YouTube asks to "sign in" again.
+function keepRotatedCookies() {
+  try {
+    if (!fs.existsSync(COOKIES_RUN) || !fs.existsSync(COOKIES)) return;
+    const t = fs.readFileSync(COOKIES_RUN, 'utf8');
+    if (hasLogin(t) && t !== fs.readFileSync(COOKIES, 'utf8')) fs.writeFileSync(COOKIES, t, { mode: 0o600 });
+  } catch (e) { /* keep the old file */ }
+}
+let cookieAlertAt = 0;
+async function runYt(args, opts) {
+  try { return await run(YTDLP, args, opts); }
+  catch (e) {
+    // cookies are there but YouTube still wants a sign-in: the session is dead, tell the owner once a day
+    if (fs.existsSync(COOKIES) && /Sign in to confirm|not a bot/i.test(e.message) && Date.now() - cookieAlertAt > 86400000) {
+      cookieAlertAt = Date.now();
+      tg.notifyAdmins('🍪 YouTube cookies ishlamay qoldi (YouTube yana "bot emasligingizni tasdiqlang" deyapti).\n\n' +
+        'Yangi cookies oling va shu botga yuboring: /cookies — yo\'riqnoma.\n<b>Muhim:</b> eksportdan keyin inkognito oynani darhol yoping va bu akkaunt bilan boshqa joyda YouTube ochmang.').catch(() => {});
+    }
+    throw e;
+  } finally { keepRotatedCookies(); }
 }
 // videos uploaded straight from the phone/computer (no YouTube download at all)
 const UPLOAD_DIR = path.join(DATA_DIR, 'uploads');
@@ -23,8 +48,7 @@ function saveCookies(text) {
   // must be exported on youtube.com while signed in: needs YouTube-domain lines and a login cookie
   if (!lines.some((l) => /(^|\s|\.)youtube\.com\t/.test(l)))
     throw new Error('Faylda youtube.com cookies yo\'q — boshqa sahifada eksport qilingan. youtube.com sahifasida turib Export qiling (fayl nomi www.youtube.com_cookies.txt bo\'ladi)');
-  const names = new Set(lines.map((l) => l.split('\t')[5]));
-  if (!['SID', '__Secure-1PSID', '__Secure-3PSID', 'LOGIN_INFO', 'SAPISID'].some((n) => names.has(n)))
+  if (!hasLogin(lines.join('\n')))
     throw new Error('Bu cookies akkauntga kirilmagan holda olingan. youtube.com da Sign in qiling (tepada avatar chiqsin), keyin Export qiling');
   fs.writeFileSync(COOKIES, (text.startsWith('# Netscape') ? '' : '# Netscape HTTP Cookie File\n') + text, { mode: 0o600 });
   log(`YouTube cookies yuklandi (${lines.length} ta)`);
@@ -81,11 +105,11 @@ const BLOCKED = /confirm your age|Sign in to confirm|not a bot|cookies/i;
 // YouTube sometimes blocks the default web client from data-centre IPs but lets other official clients through
 const ALT_CLIENTS = ['--extractor-args', 'youtube:player_client=tv,web_safari,mweb'];
 async function ytdlp(args, opts, state) {
-  try { return await run(YTDLP, [...ytArgs(), ...(state.alt ? ALT_CLIENTS : []), ...args], opts); }
+  try { return await runYt([...ytArgs(), ...(state.alt ? ALT_CLIENTS : []), ...args], opts); }
   catch (e) {
     if (state.alt || !BLOCKED.test(e.message)) throw explainYtdlp(e);
     state.alt = true;
-    try { return await run(YTDLP, [...ytArgs(), ...ALT_CLIENTS, ...args], opts); } catch (e2) { throw explainYtdlp(e2); }
+    try { return await runYt([...ytArgs(), ...ALT_CLIENTS, ...args], opts); } catch (e2) { throw explainYtdlp(e2); }
   }
 }
 
@@ -127,7 +151,7 @@ async function download(job, dir, quality, allowLow = false) {
   for (const st of strategies) {
     for (const f of fs.readdirSync(dir)) if (f.startsWith('source.')) fs.rmSync(path.join(dir, f), { force: true });
     try {
-      await run(YTDLP, [...ytArgs(), ...st.args, ...common], { onLine: progress });
+      await runYt([...ytArgs(), ...st.args, ...common], { onLine: progress });
       if (st !== strategies[0]) log(`#${job.id}: video "${st.name}" usuli bilan yuklab olindi`);
       lastErr = null; break;
     } catch (e) {
@@ -407,7 +431,7 @@ function normalizeSourceUrl(url) {
   return url;
 }
 async function listSourceVideos(url) {
-  const { out } = await run(YTDLP, [...ytArgs(), '--flat-playlist', '-I', '1:10', '-J', '--no-warnings', url], { timeoutMs: 120000 }).catch((e) => { throw explainYtdlp(e); });
+  const { out } = await runYt([...ytArgs(), '--flat-playlist', '-I', '1:10', '-J', '--no-warnings', url], { timeoutMs: 120000 }).catch((e) => { throw explainYtdlp(e); });
   const j = JSON.parse(out);
   return { name: j.channel || j.uploader || j.title, entries: (j.entries || []).map((e) => ({ id: e.id, title: e.title || '', duration: e.duration || null,
     url: e.url && /^https?:/.test(e.url) ? e.url : (e.webpage_url || (url.includes('youtube') ? 'https://www.youtube.com/watch?v=' + e.id : e.url)),
