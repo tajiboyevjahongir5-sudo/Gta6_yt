@@ -107,6 +107,23 @@ async function api(req, res, url) {
   }
   const uid = checkToken((req.headers.authorization || '').replace(/^Bearer /, ''));
   if (!uid) return send(res, 401, { error: 'Sessiya tugadi' });
+  // raw video upload (streamed to disk, no size limit besides the volume): PUT /api/upload?name=file.mp4
+  if (p === '/api/upload' && m === 'PUT') {
+    const name = String(url.searchParams.get('name') || 'video.mp4').replace(/[^\w.\- ]+/g, '_').slice(-80);
+    if (!/\.(mp4|mov|mkv|webm|m4v|avi)$/i.test(name)) return send(res, 400, { error: 'Video fayl tanlang (mp4, mov, mkv, webm)' });
+    fs.mkdirSync(pipeline.UPLOAD_DIR, { recursive: true });
+    const file = path.join(pipeline.UPLOAD_DIR, `${Date.now()}-${name}`);
+    const out = fs.createWriteStream(file);
+    req.pipe(out);
+    req.on('aborted', () => { out.destroy(); fs.rmSync(file, { force: true }); });
+    out.on('finish', () => {
+      if (!fs.statSync(file).size) { fs.rmSync(file, { force: true }); return send(res, 400, { error: 'Fayl bo\'sh' }); }
+      try { send(res, 200, pipeline.addJob('upload:' + path.basename(file), null, { title: name.replace(/\.[^.]+$/, '') })); }
+      catch (e) { send(res, 400, { error: e.message }); }
+    });
+    out.on('error', (e) => send(res, 500, { error: e.message }));
+    return;
+  }
   const b = ['POST', 'PATCH', 'PUT'].includes(m) ? await readBody(req) : {};
   let mm;
 

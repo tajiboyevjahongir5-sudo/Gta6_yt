@@ -156,6 +156,11 @@ Ma'lumotlar `DATA_DIR` da: `lahza.db`, `work/` (vaqtinchalik), `out/` (tayyor kl
 - Prevyu A/B test (YouTube "Test & Compare")
 
 ## YouTube serverni bloklasa
+Cookies'siz yo'llar:
+- **📁 Video faylini yuklash** (Asosiy sahifa): videoni telefondan/kompyuterdan to'g'ridan-to'g'ri yuklaysiz — YouTube ishtirok etmaydi.
+- **Twitch / Kick** havolalari — odatda bloklanmaydi.
+- **Proxy**: Railway'ga `YTDLP_PROXY=http://user:pass@host:port` (uy/residential proxy — pullik, stream hajmi katta bo'lgani uchun GB bo'yicha hisoblanadi).
+
 Railway kabi ma'lumot markazlaridan kelgan so'rovlarni YouTube ko'pincha "Sign in to confirm you're not a bot" deb to'xtatadi.
 Lahza avval boshqa rasmiy YouTube klientlari bilan qayta urinadi; o'tmasa — **cookies** kerak: kompyuterda
 "Get cookies.txt LOCALLY" kengaytmasi bilan **ikkinchi** Google akkauntdan eksport qilib, faylni botga yuboring (`/cookies` — yo'riqnoma).

@@ -62,7 +62,9 @@ async function home() {
   if (!o.ai) warn.push('AI ulanmagan: videolar to\'liq tahlil qilinmaydi. <a href="#" data-go="settings" style="color:inherit">Bepul Gemini kalitini qo\'shing</a>');
   $('#view').innerHTML = `
     ${connectCta}${warn.map((w) => `<div class="warnbox">${w}</div>`).join('')}
-    <div class="card"><div class="row"><input type="url" id="url" class="grow" placeholder="Stream yoki video havolasi (YouTube, Twitch, Kick)"><button class="btn primary" id="add">Qo'shish</button></div></div>
+    <div class="card"><div class="row"><input type="url" id="url" class="grow" placeholder="Stream yoki video havolasi (YouTube, Twitch, Kick)"><button class="btn primary" id="add">Qo'shish</button></div>
+      <label class="btn" style="display:block;text-align:center;margin-top:8px;cursor:pointer">📁 Video faylini yuklash<input type="file" id="vfile" accept="video/*" hidden></label>
+      <div id="upl" class="hidden"><div class="small muted" id="uplTxt" style="margin-top:8px"></div><div class="bar"><i id="uplBar" style="width:0"></i></div></div></div>
     <div class="grid">
       <div class="tile"><div class="v">${ch ? num(ch.subscribers) : '—'}</div><div class="l">Obunachilar</div></div>
       <div class="tile"><div class="v">${ch ? num(ch.views) : num(o.counts.views)}</div><div class="l">Jami ko'rishlar</div></div>
@@ -77,10 +79,29 @@ async function home() {
     <h2>So'nggi hodisalar</h2>
     <div class="card">${o.logs.map((l) => `<div class="log ${l.level}"><b>${ago(l.ts)}</b> · ${esc(l.msg)}</div>`).join('') || '<div class="muted small">Hali hech narsa yo\'q</div>'}</div>`;
   $('#add').onclick = addUrl;
+  $('#vfile').onchange = (e) => uploadVideo(e.target.files[0]);
   if ($('#cta')) $('#cta').onclick = connectYouTube;
   bindCommon();
-  timer = setInterval(() => page === 'home' && !$('#url:focus') && home(), 8000);
+  timer = setInterval(() => page === 'home' && !uploading && !$('#url:focus') && home(), 8000);
 }
+// streamed upload with progress (XHR gives upload progress, fetch doesn't)
+let uploading = false;
+function uploadVideo(file) {
+  if (!file) return;
+  uploading = true; $('#upl').classList.remove('hidden');
+  const mb = (n) => (n / 1048576).toFixed(0);
+  const x = new XMLHttpRequest();
+  x.open('PUT', '/api/upload?name=' + encodeURIComponent(file.name));
+  x.setRequestHeader('authorization', 'Bearer ' + token);
+  x.upload.onprogress = (e) => { if (!e.lengthComputable) return; $('#uplBar').style.width = (e.loaded / e.total * 100) + '%';
+    $('#uplTxt').textContent = `Yuklanmoqda: ${mb(e.loaded)} / ${mb(e.total)} MB — oynani yopmang`; };
+  x.onload = () => { uploading = false; let j = {}; try { j = JSON.parse(x.responseText); } catch (er) {}
+    if (x.status === 200) { haptic('medium'); toast('✅ Yuklandi, navbatga qo\'shildi #' + j.id); go('jobs'); }
+    else { toast(j.error || 'Yuklashda xato'); $('#upl').classList.add('hidden'); } };
+  x.onerror = () => { uploading = false; toast('Internet uzildi, qaytadan urinib ko\'ring'); $('#upl').classList.add('hidden'); };
+  x.send(file);
+}
+
 async function addUrl() {
   const url = $('#url').value.trim(); if (!url) return;
   try { const r = await api('/api/jobs', { method: 'POST', body: { url } }); haptic('medium'); toast(r.duplicate ? 'Bu video allaqachon bor' : 'Navbatga qo\'shildi #' + r.id); $('#url').value = ''; }

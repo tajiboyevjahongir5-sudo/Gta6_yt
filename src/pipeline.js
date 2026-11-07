@@ -8,10 +8,14 @@ const { WORK_DIR, OUT_DIR, YTDLP, DATA_DIR } = require('./config');
 const COOKIES = path.join(DATA_DIR, 'cookies.txt');
 // yt-dlp rewrites the cookie file it is given, so it gets a copy and the uploaded file stays intact
 function ytArgs() {
-  if (!fs.existsSync(COOKIES)) return [];
+  // optional proxy (a residential proxy gets past YouTube's block on data-centre IPs), e.g. http://user:pass@host:port
+  const proxy = process.env.YTDLP_PROXY ? ['--proxy', process.env.YTDLP_PROXY] : [];
+  if (!fs.existsSync(COOKIES)) return proxy;
   const copy = path.join(DATA_DIR, 'cookies.run.txt'); fs.copyFileSync(COOKIES, copy);
-  return ['--cookies', copy];
+  return [...proxy, '--cookies', copy];
 }
+// videos uploaded straight from the phone/computer (no YouTube download at all)
+const UPLOAD_DIR = path.join(DATA_DIR, 'uploads');
 function saveCookies(text) {
   text = String(text || '').replace(/\r/g, '');
   const lines = text.split('\n').filter((l) => l.split('\t').length >= 7);
@@ -46,7 +50,7 @@ const tg = require('./telegram');
 function normalizeVideoUrl(url) { return String(url).trim(); }
 function addJob(url, sourceId = null, meta = {}) {
   url = normalizeVideoUrl(url);
-  if (!/^https?:\/\//.test(url)) throw new Error('Havola noto\'g\'ri');
+  if (!/^(https?:\/\/|upload:)/.test(url)) throw new Error('Havola noto\'g\'ri');
   const dup = db.prepare("SELECT id, status FROM jobs WHERE url = ? AND status NOT IN ('failed')").get(url);
   if (dup) return { id: dup.id, duplicate: true };
   const t = Date.now();
@@ -71,6 +75,16 @@ async function ytdlp(args, opts, state) {
 }
 
 async function download(job, dir, quality) {
+  if (job.url.startsWith('upload:')) {
+    const f = path.join(UPLOAD_DIR, path.basename(job.url.slice(7)));
+    if (!fs.existsSync(f)) throw new Error('Yuklangan fayl topilmadi, qaytadan yuklang');
+    const dest = path.join(dir, 'source' + (path.extname(f) || '.mp4'));
+    fs.renameSync(f, dest);
+    const title = (job.title || path.basename(f)).replace(/^\d+-/, '').replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ');
+    const meta = { title, description: '', tags: [], categories: [], channel: '', duration: null, chapters: [] };
+    setJob(job.id, { title, meta });
+    return { file: dest, meta, transcript: '' };
+  }
   const state = {};
   const { out } = await ytdlp(['--dump-single-json', '--no-playlist', '--no-warnings', job.url], { timeoutMs: 120000 }, state);
   const meta = JSON.parse(out);
@@ -380,4 +394,4 @@ function start() {
   every(3 * 3600000, refreshStats);
 }
 
-module.exports = { COOKIES, saveCookies, start, addJob, addSource, checkSources, scheduleClip, refreshStats, announceClip, chooseMoments, normalizeSourceUrl, kick };
+module.exports = { COOKIES, UPLOAD_DIR, saveCookies, start, addJob, addSource, checkSources, scheduleClip, refreshStats, announceClip, chooseMoments, normalizeSourceUrl, kick };
