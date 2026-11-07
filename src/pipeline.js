@@ -39,7 +39,7 @@ function explainYtdlp(e) {
     return wrap(fs.existsSync(COOKIES)
       ? 'YouTube kirishni talab qildi, cookies eskirgan bo\'lishi mumkin: Sozlamalar → 🍪 YouTube cookies ni yangilang'
       : 'YouTube serverni bloklayapti (bot tekshiruvi yoki 18+): cookies.txt faylini botga yuboring yoki Sozlamalar → 🍪 YouTube cookies, keyin "Qayta urinish"');
-  if (/HTTP Error 403|Forbidden/i.test(m)) return wrap('YouTube videoni yuklab berishni rad etdi (403) — barcha usullar sinaldi. Bir oz kutib "Qayta urinish" qiling; takrorlansa cookies\'ni yangilang yoki videoni 📁 fayl qilib yuklang');
+  if (/HTTP Error 403|Forbidden/i.test(m)) return wrap('YouTube yuqori sifatdagi videoni berishni rad etdi (403), barcha HD usullar sinaldi. Variantlar: 10-20 daqiqadan keyin "Qayta urinish"; cookies\'ni yangilash; videoni 📁 fayl qilib yuklash; yoki Sozlamalar → "Past sifatga ruxsat" (360p)');
   if (/Private video|members-only|Join this channel/i.test(m)) return wrap('Video yopiq yoki faqat a\'zolar uchun');
   if (/is not available|Video unavailable/i.test(m)) return wrap('Video mavjud emas yoki o\'chirilgan');
   return e;
@@ -89,7 +89,7 @@ async function ytdlp(args, opts, state) {
   }
 }
 
-async function download(job, dir, quality) {
+async function download(job, dir, quality, allowLow = false) {
   if (job.url.startsWith('upload:')) {
     const f = path.join(UPLOAD_DIR, path.basename(job.url.slice(7)));
     if (!fs.existsSync(f)) throw new Error('Yuklangan fayl topilmadi, qaytadan yuklang');
@@ -120,7 +120,7 @@ async function download(job, dir, quality) {
     { name: 'standart', args: ['-f', fmt] },
     { name: 'TV/Safari/mobil klient', args: ['--extractor-args', 'youtube:player_client=tv,web_safari,mweb', '-f', fmt] },
     { name: 'web_embedded klient', args: ['--extractor-args', 'youtube:player_client=web_embedded,tv', '-f', fmt] },
-    { name: '360p bir faylli format', args: ['-f', '18/b[height<=480]/b'] },
+    ...(allowLow ? [{ name: '360p bir faylli format (past sifat)', args: ['-f', '18/b[height<=480]/b'] }] : []),
   ];
   const progress = (l) => { const m = l.match(/\[download\]\s+([\d.]+)%/); if (m) setJob(job.id, { progress: Number(m[1]) / 100 }); };
   let lastErr = null;
@@ -192,7 +192,7 @@ async function processJob(job) {
   const outDir = path.join(OUT_DIR, String(job.id)); fs.mkdirSync(outDir, { recursive: true });
 
   setJob(job.id, { status: 'downloading', step: 'Yuklab olinmoqda', progress: 0, error: null });
-  const { file: src, meta, transcript } = await download(job, dir, settings.quality);
+  const { file: src, meta, transcript } = await download(job, dir, settings.quality, settings.lowQualityFallback);
   job = db.prepare('SELECT * FROM jobs WHERE id = ?').get(job.id);
   const source = job.source_id ? db.prepare('SELECT * FROM sources WHERE id = ?').get(job.source_id) : null;
   if (source?.credit) job.author = source.credit;

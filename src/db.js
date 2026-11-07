@@ -44,7 +44,8 @@ const DEFAULTS = {
   highlightCount: 10,          // how many moments go into the compilation
   targetMinutes: 10,           // compilation length goal
   clipBefore: 12, clipAfter: 8, // seconds kept around each peak
-  quality: 720,                // download height (720 is fast, 1080 looks better)
+  quality: 1080,               // download height: 720 | 1080 | 1440
+  lowQualityFallback: false,   // if YouTube refuses every HD way (403), allow a 360p download instead of failing
   language: 'en',              // video language: titles, descriptions, tags, subtitles (en = speech translated to English)
   game: '',                    // topic hint for the AI ('' = detect from each video)
   channelName: 'Lahza',
