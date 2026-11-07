@@ -365,7 +365,7 @@ async function processJob(job) {
         words = abs.filter((w) => w.end > s.start && w.start < s.end).map((w) => ({ ...w, start: +(w.start - s.start).toFixed(2), end: +(w.end - s.start).toFixed(2) }));
       }
       await render.renderShort(src, s, out, dir, { words, accent: settings.accent, style: settings.subtitleStyle, emoji: s.emoji, effects: settings.effects, emojis: settings.emojis, facecam,
-        zoom: settings.zoom, endCard: settings.outro ? card : null, meme: settings.memes ? s.meme : '' });
+        zoom: settings.zoom, endCard: settings.outro ? card : null, meme: settings.memes ? s.meme : '', climaxFull: settings.climaxFull });
       await render.grabFrame(out, 1.5, thumb, 540);
       const description = [title, '', creditLine(job), '', ['#shorts', ...hashtags].join(' ')].join('\n');
       const shortDur = s.parts ? s.parts.reduce((t, p) => t + p.end - p.start, 0) : s.end - s.start;

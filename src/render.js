@@ -148,30 +148,34 @@ async function renderShort(src, seg, out, workDir, opts = {}) {
     return renderShortRaw(src, seg, out, workDir, { ...opts, effects: false, words: [] });
   }
 }
-// split-screen crop boxes for a streamer webcam: cam on top (1080x640), gameplay below (1080x1280)
-const CAM_H = 640, GAME_H = 1920 - CAM_H;
+// split-screen for a streamer webcam: the WHOLE webcam on top (its height follows the webcam's shape,
+// 560..860 px, like human editors do), gameplay fills the rest below
+const CAM_H = 640;
 function facecamCrops(fc) {
   const even = (n) => Math.max(2, Math.round(n / 2) * 2);
-  const ar = 1080 / CAM_H;
-  // webcam: fill 1080x640 from inside the detected webcam box, keeping the face in view
+  const camH = even(Math.min(860, Math.max(560, 1080 * fc.h / fc.w)));
+  const ar = 1080 / camH;
+  // only trims what doesn't fit those limits (very wide or very tall webcams), keeping the face in view
   let cw = fc.w, ch = fc.h;
   if (cw / ch > ar) cw = ch * ar; else ch = cw / ar;
   const [fx, fy, fw, fh] = fc.face || [fc.x + fc.w / 2, fc.y + fc.h / 2, 0, 0];
   const cx = Math.min(Math.max(fx + fw / 2 - cw / 2, fc.x), fc.x + fc.w - cw);
   const cy = Math.min(Math.max(fy + fh / 2 - ch * 0.42, fc.y), fc.y + fc.h - ch);
   // gameplay: centre slice of the full frame, pushed away from the webcam side so the cam isn't shown twice
-  const gw = Math.min(fc.width, fc.height * 1080 / GAME_H), camMid = fc.x + fc.w / 2;
+  const gameH = 1920 - camH;
+  const gw = Math.min(fc.width, fc.height * 1080 / gameH), camMid = fc.x + fc.w / 2;
   let gx = (fc.width - gw) / 2;
-  if (camMid > fc.width * 0.6) gx = Math.max(0, Math.min(gx, fc.x - gw));          // cam on the right
-  else if (camMid < fc.width * 0.4) gx = Math.min(fc.width - gw, Math.max(gx, fc.x + fc.w)); // cam on the left
-  return { cam: { w: even(cw), h: even(ch), x: even(cx), y: even(cy) }, game: { w: even(gw), h: even(fc.height), x: even(gx) } };
+  const gap = fc.width * 0.04;  // the detected box may sit a little inside the real webcam edge
+  if (camMid > fc.width * 0.6) gx = Math.max(0, Math.min(gx, fc.x - gap - gw));          // cam on the right
+  else if (camMid < fc.width * 0.4) gx = Math.min(fc.width - gw, Math.max(gx, fc.x + fc.w + gap)); // cam on the left
+  return { camH, gameH, cam: { w: even(cw), h: even(ch), x: even(cx), y: even(cy) }, game: { w: even(gw), h: even(fc.height), x: even(gx) } };
 }
 
 // select expression for jump-cut "story" Shorts: parts are [{start,end}] relative to the input start
 const partsExpr = (parts) => parts.map((p) => `between(t,${p.start.toFixed(2)},${p.end.toFixed(2)})`).join('+');
 
 async function renderShortRaw(src, seg, out, workDir, { words = [], accent = '#FFD400', style = 'pop', emoji = '', effects = true, emojis = false,
-  facecam = null, zoom = true, endCard = null, meme = '' } = {}) {
+  facecam = null, zoom = true, endCard = null, meme = '', climaxFull = true } = {}) {
   const parts = seg.parts && seg.parts.length ? seg.parts : null;
   const span = seg.end - seg.start;                              // input length read from the source
   const dur = parts ? Math.min(60, parts.reduce((t, p) => t + p.end - p.start, 0)) : Math.min(58, span);
@@ -181,15 +185,16 @@ async function renderShortRaw(src, seg, out, workDir, { words = [], accent = '#F
   // jump cuts: keep only the parts, then renumber timestamps (hard cuts, like a human editor)
   const vsel = parts ? `select='${partsExpr(parts)}',setpts=N/${FPS}/TB,` : '';
   // climax: webcam disappears, the gameplay takes the whole screen for a moment
-  const climax = facecam && effects ? { a: Math.max(0, peakT - 1.5), b: Math.min(dur - 0.5, peakT + 2.6) } : null;
+  const climax = facecam && effects && climaxFull ? { a: Math.max(0, peakT - 1.5), b: Math.min(dur - 0.5, peakT + 2.6) } : null;
+  const camH = facecam ? facecamCrops(facecam).camH : CAM_H;
   let fc;
   let emojiArea = { x: 70, y: bandY + 30, w: 800, h: 560, size: 300 };
   if (facecam) {
     // streamer layout (like popular gaming Shorts): webcam on top, a thin accent line, gameplay filling the rest
     const c = facecamCrops(facecam);
-    fc = `[0:v]fps=${FPS},${vsel}split=${climax ? 3 : 2}[a][b]${climax ? '[f]' : ''};[a]crop=${c.cam.w}:${c.cam.h}:${c.cam.x}:${c.cam.y},scale=1080:${CAM_H}:flags=lanczos,setsar=1[cam];` +
-      `[b]crop=${c.game.w}:${c.game.h}:${c.game.x}:0,scale=1080:${GAME_H}:flags=lanczos,setsar=1${zf(1080, GAME_H)}[game];` +
-      `[cam][game]vstack,drawbox=x=0:y=${CAM_H - 4}:w=1080:h=8:color=${accent.replace('#', '0x')}:t=fill[stack];`;
+    fc = `[0:v]fps=${FPS},${vsel}split=${climax ? 3 : 2}[a][b]${climax ? '[f]' : ''};[a]crop=${c.cam.w}:${c.cam.h}:${c.cam.x}:${c.cam.y},scale=1080:${c.camH}:flags=lanczos,setsar=1[cam];` +
+      `[b]crop=${c.game.w}:${c.game.h}:${c.game.x}:0,scale=1080:${c.gameH}:flags=lanczos,setsar=1${zf(1080, c.gameH)}[game];` +
+      `[cam][game]vstack,drawbox=x=0:y=${c.camH - 4}:w=1080:h=8:color=${accent.replace('#', '0x')}:t=fill[stack];`;
     if (climax) {
       const fw = Math.round(Math.min(facecam.width, facecam.height * 9 / 16) / 2) * 2, camMid = facecam.x + facecam.w / 2;
       let fx = (facecam.width - fw) / 2;
@@ -198,7 +203,7 @@ async function renderShortRaw(src, seg, out, workDir, { words = [], accent = '#F
         `[stack][full]overlay=0:0:enable='between(t,${climax.a.toFixed(2)},${climax.b.toFixed(2)})'[st2];`;
     }
     fc += `[${climax ? 'st2' : 'stack'}]fps=${FPS},fade=t=in:st=0:d=0.25[v0];`;
-    emojiArea = { x: 70, y: CAM_H + 40, w: 800, h: 520, size: 300 };
+    emojiArea = { x: 70, y: camH + 40, w: 800, h: Math.max(300, 1240 - camH - 40), size: 300 };
   } else {
     fc = `[0:v]fps=${FPS},${vsel}split[a][b];[a]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,boxblur=25:2,eq=brightness=-0.15[bg];` +
       `[b]scale=-2:${band},crop=1080:${band}${zf(1080, band)}[fg];[bg][fg]overlay=(W-w)/2:${bandY}:shortest=1,fps=${FPS},fade=t=in:st=0:d=0.25[v0];`;
@@ -220,7 +225,7 @@ async function renderShortRaw(src, seg, out, workDir, { words = [], accent = '#F
         const b = isLast ? t1 : t0 + (idx + 1) * dt;
         const tf = textFile(workDir, `${path.basename(out)}.meme${li}_${k}.txt`, st.text);
         draws.push(`drawtext=${fontOpt()}textfile='${esc(tf)}':fontsize=86:fontcolor=white:borderw=9:bordercolor=black:shadowx=4:shadowy=6:shadowcolor=black@0.5:` +
-          `x=(w-text_w)/2:y=${(facecam ? CAM_H + 300 : 820) + li * 104}:enable='between(t,${a.toFixed(2)},${b.toFixed(2)})'`);
+          `x=(w-text_w)/2:y=${(facecam ? camH + 240 : 820) + li * 104}:enable='between(t,${a.toFixed(2)},${b.toFixed(2)})'`);
       });
       shown++;
     });
@@ -234,7 +239,7 @@ async function renderShortRaw(src, seg, out, workDir, { words = [], accent = '#F
   // never over the climax/reaction: starts after it, skipped if there's no room left
   let cardT = endCard && dur >= 9 ? Math.max(dur - 3.4, peakT + 3.0) : null;
   if (cardT !== null && cardT > dur - 2.4) cardT = null;
-  const cardEvents = cardT !== null ? await fx.subscribeEvents(cardT, 40, (facecam ? CAM_H : 0) + 150, endCard) : [];
+  const cardEvents = cardT !== null ? await fx.subscribeEvents(cardT, 40, (facecam ? camH : 0) + 120, endCard) : [];
   if (cardEvents.length) { fc += `;[v0]drawbox=x=0:y=0:w=iw:h=ih:color=black@0.3:t=fill:enable='gte(t,${cardT.toFixed(2)})'[vd]`; v = 'vd'; }
   if (effects || cardEvents.length) {
     const events = [...(effects ? fx.planEvents({ dur, peakT: (seg.peak ?? seg.start + dur / 2) - seg.start, peakEmoji: emoji || '😱', words, emojis,

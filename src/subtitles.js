@@ -39,12 +39,14 @@ async function transcribe(src, start, dur, workDir, { model = 'large-v3-turbo', 
       { timeoutMs: 20 * 60000 })).out);
     let j = await asr();
     let words = (j.words || []).filter((w) => w.end > 0 && w.start < dur);
-    if (!words.length || !to || j.language === to) return words;
-    const translated = await translateWords(words, j.language, to, context);
-    if (translated) return translated;
+    if (!words.length) return words;
+    // the AI listens to the clip and fixes (same language) or translates each phrase; Whisper keeps the timing
+    const fixed = await translateWords(words, j.language, to || j.language, context, wav);
+    if (fixed) return lead(fixed);
+    if (!to || j.language === to) return lead(words);
     // no AI: Whisper's own speech -> English translation (less accurate)
-    if (to === 'en') { j = await asr(['--to', 'en']); return (j.words || []).filter((w) => w.end > 0 && w.start < dur); }
-    return words;
+    if (to === 'en') { j = await asr(['--to', 'en']); return lead((j.words || []).filter((w) => w.end > 0 && w.start < dur)); }
+    return lead(words);
   } catch (e) {
     if (/ENOENT|ModuleNotFoundError|No module named/.test(e.message)) {
       unavailable = true; log('Subtitr o\'chiq: python3 + faster-whisper o\'rnatilmagan (pip install faster-whisper)', 'warn');
@@ -53,25 +55,33 @@ async function transcribe(src, start, dur, workDir, { model = 'large-v3-turbo', 
   } finally { fs.rmSync(wav, { force: true }); }
 }
 
+// subtitles appear a hair before the voice (Whisper marks word starts a bit late; editors lead by ~0.15 s)
+const lead = (ws, by = 0.15) => ws.map((w) => ({ ...w, start: Math.max(0, +(w.start - by).toFixed(2)), end: Math.max(0.05, +(w.end - by).toFixed(2)) }));
+
 const LANG_NAMES = { en: 'English', ru: 'Russian', uz: 'Uzbek', tr: 'Turkish', kk: 'Kazakh', ky: 'Kyrgyz', tg: 'Tajik', de: 'German', es: 'Spanish' };
-async function translateWords(words, from, to, context) {
+async function translateWords(words, from, to, context, audio = null) {
   const ai = require('./ai');
   if (!ai.enabled()) return null;
   const groups = phrases(words, { maxWords: 6, maxChars: 34, gap: 0.7 });
   const lines = groups.map((g) => g.map((w) => w.word).join(' '));
+  const same = from === to;
+  const target = to === 'uz' ? 'Uzbek in LATIN script (oʻ/gʻ written as o\' and g\', sh, ch; never Cyrillic)' : (LANG_NAMES[to] || to);
+  const parts = [];
+  if (audio && fs.existsSync(audio)) parts.push({ text: 'The audio of the clip (listen to it):' }, { audio });
+  parts.push({ text:
+    `Subtitle lines from automatic speech recognition of ${LANG_NAMES[from] || from} speech in the video "${context.title || ''}"${context.subject ? ` (${context.subject})` : ''}.\n` +
+    `Recognition is often wrong (especially for Uzbek and gaming slang). ${audio ? 'Listen to the audio and' : 'Using the context,'} ` +
+    (same ? `write what is ACTUALLY said in each line, in ${target}.` : `translate what is ACTUALLY said in each line into short, natural spoken ${target}.`) + `\n` +
+    `Keep the tone, slang and emotion. Keep each line short (it is on screen ~1-2 s). No quotes, no notes, no speaker names.\n` +
+    `Return exactly ${lines.length} lines in "lines", same order, one per input line (if a line is just noise, return an empty string).\n\n` +
+    lines.map((l, i) => `${i + 1}. [${groups[i][0].start.toFixed(1)}-${groups[i][groups[i].length - 1].end.toFixed(1)}s] ${l}`).join('\n') });
   const r = await ai.generateJSON({
     schema: { type: 'object', additionalProperties: false, required: ['lines'],
       properties: { lines: { type: 'array', items: { type: 'string' } } } },
-    maxTokens: 4000,
-    parts: [{ text:
-      `Subtitle lines from a ${LANG_NAMES[from] || from} speaker in the video "${context.title || ''}"${context.subject ? ` (${context.subject})` : ''}.\n` +
-      `They come from automatic speech recognition, so some words may be misheard: fix them using the context.\n` +
-      `Translate every line into short, natural spoken ${LANG_NAMES[to] || to} (keep the tone, slang and emotion; no quotes, no extra notes).\n` +
-      `Return exactly ${lines.length} lines in "lines", in the same order, one per input line.\n\n` +
-      lines.map((l, i) => `${i + 1}. ${l}`).join('\n') }],
+    maxTokens: 4000, parts,
   });
   const out = r?.data?.lines;
-  if (!Array.isArray(out) || out.length !== lines.length) { log('Subtitr tarjimasi mos kelmadi, Whisper tarjimasi ishlatiladi', 'warn'); return null; }
+  if (!Array.isArray(out) || out.length !== lines.length) { log('AI subtitr javobi mos kelmadi, Whisper matni ishlatiladi', 'warn'); return null; }
   // spread each translated line's words over the time its original phrase was spoken (longer words get more time)
   const res = [];
   groups.forEach((g, i) => {

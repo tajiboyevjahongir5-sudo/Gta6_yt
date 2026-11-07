@@ -24,7 +24,7 @@ async function callClaude({ parts, schema, effort = 'medium', maxTokens = 10000 
     model: AI_MODEL, max_tokens: maxTokens,
     betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default',
     output_config: { effort, format: { type: 'json_schema', schema } },
-    messages: [{ role: 'user', content: parts.map((p) => (p.image
+    messages: [{ role: 'user', content: parts.filter((p) => !p.audio).map((p) => (p.image
       ? { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: b64(p.image) } } : { type: 'text', text: p.text })) }],
   });
   if (res.stop_reason === 'refusal') throw new Error('Claude so\'rovni rad etdi');
@@ -51,7 +51,8 @@ let geminiWorking = null;
 // youtube: { url, fps } — Gemini watches a public YouTube video itself (picture + sound), no download needed
 async function callGemini({ parts, schema, youtube }) {
   const key = geminiKey(); if (!key) throw new Error('Gemini kaliti yo\'q');
-  const gparts = parts.map((p) => (p.image ? { inlineData: { mimeType: 'image/jpeg', data: b64(p.image) } } : { text: p.text }));
+  const gparts = parts.map((p) => (p.image ? { inlineData: { mimeType: 'image/jpeg', data: b64(p.image) } }
+    : p.audio ? { inlineData: { mimeType: 'audio/wav', data: b64(p.audio) } } : { text: p.text }));
   const build = (withVideo) => ({
     contents: [{ role: 'user', parts: withVideo && youtube
       ? [{ fileData: { fileUri: youtube.url }, videoMetadata: { fps: youtube.fps || 0.5 } }, ...gparts] : gparts }],

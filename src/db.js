@@ -66,6 +66,7 @@ const DEFAULTS = {
   storyShorts: true,           // Shorts tell the story: build-up with jump cuts -> climax (full screen) -> reaction
   shortTarget: 55,             // story Short length goal, seconds
   memes: true,                 // AI meme caption at the climax, typed word by word
+  climaxFull: true,            // at the climax the webcam disappears and the gameplay fills the screen for ~4 s
   outro: true,                 // end card: 6 s outro on compilations, subscribe animation at the end of Shorts
   subscribeCustom: false,      // use the owner's own green-screen subscribe video (uploaded in the panel)
   gsKey: '#00FF00',            // its background colour to key out
