@@ -256,9 +256,13 @@ const botHandlers = {
     catch (e) { return '⚠️ ' + e.message; }
   },
   async onCommand(cmd) {
+    if (cmd === '/start' && !cfg.PUBLIC_URL.startsWith('https://')) return `<b>Lahza</b> ishlayapti, lekin <b>Panel</b> tugmasi chiqmaydi: server manzili (HTTPS domen) topilmadi.\n\n` +
+      `Railway → servis → <b>Settings → Networking → Generate Domain</b>, so'ng <b>Redeploy</b>. Keyin qayta /start yozing.` +
+      (cfg.PUBLIC_URL ? `\n\nHozirgi PUBLIC_URL: <code>${tg.escHtml(cfg.PUBLIC_URL)}</code> (https bo'lishi kerak)` : '');
     if (cmd === '/start') return { text: `<b>Lahza</b> — stream'lardan eng zo'r lahzalarni kesib, YouTube kanalingizga yuklaydi.\n\n` +
       `• Stream/video havolasini yuboring — men ishlayman\n• Kuzatiladigan kanallarni paneldagi <b>Manbalar</b> bo'limiga qo'shing\n• Tayyor kliplarni shu yerda tasdiqlaysiz`,
       extra: tg.webAppButton() ? { reply_markup: tg.webAppButton() } : {} };
+    // without an https address Telegram can't open the Web App: say why instead of silently showing no button
     if (cmd === '/navbat') {
       const rows = db.prepare("SELECT * FROM jobs WHERE status NOT IN ('done') ORDER BY id DESC LIMIT 10").all();
       return rows.length ? rows.map((j) => `#${j.id} ${STATUS_UZ[j.status] || j.status} ${j.progress ? Math.round(j.progress * 100) + '%' : ''}\n${tg.escHtml((j.title || j.url).slice(0, 70))}`).join('\n\n') : 'Navbat bo\'sh';
