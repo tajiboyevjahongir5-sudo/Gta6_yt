@@ -23,12 +23,12 @@ const SCRIPT = path.join(__dirname, '..', 'scripts', 'transcribe.py');
 let unavailable = false;
 
 // words spoken inside [start, start+dur] of the source, with times relative to the clip
-async function transcribe(src, start, dur, workDir, { model = 'small', lang = 'auto' } = {}) {
+async function transcribe(src, start, dur, workDir, { model = 'small', lang = 'auto', to = 'en' } = {}) {
   if (unavailable) return [];
   const wav = path.join(workDir, `sub_${Math.round(start)}.wav`);
   try {
     await run(FFMPEG, ['-y', '-hide_banner', '-loglevel', 'error', '-ss', String(start), '-t', String(dur), '-i', src, '-vn', '-ac', '1', '-ar', '16000', wav]);
-    const { out } = await run(PY, [SCRIPT, wav, '--model', model, '--lang', lang], { timeoutMs: 15 * 60000 });
+    const { out } = await run(PY, [SCRIPT, wav, '--model', model, '--lang', lang, '--to', to], { timeoutMs: 15 * 60000 });
     const j = JSON.parse(out);
     return (j.words || []).filter((w) => w.end > 0 && w.start < dur);
   } catch (e) {
@@ -62,13 +62,15 @@ function fontFamily() {
   catch (e) { return /DejaVu/i.test(FONT) ? 'DejaVu Sans' : path.basename(FONT).replace(/[-_ ]?(Bold|Black|Heavy).*$/i, '').replace(/\.[ot]tf$/i, ''); }
 }
 
-// ASS file. style 'clean' = like the reference Short (italic, white, soft shadow, sentence case);
-// 'karaoke' = bold caps with the spoken word in the accent colour.
-function buildAss(words, dur, { accent = '#FFD400', style = 'clean' } = {}) {
-  const karaoke = style === 'karaoke';
-  const size = karaoke ? 70 : 66;
+// ASS file. Styles:
+//   'pop'     (default) words appear one by one exactly when spoken, each with a bouncy pop; the newest word in accent colour
+//   'clean'   like the reference Short: italic white phrase, soft shadow
+//   'karaoke' bold caps phrase, the spoken word in accent colour
+function buildAss(words, dur, { accent = '#FFD400', style = 'pop' } = {}) {
+  const karaoke = style === 'karaoke', pop = style === 'pop';
+  const size = karaoke || pop ? 70 : 66;
   const marginV = SAFE.H - SAFE.subBottom; // alignment 2 = bottom-centre between MarginL and MarginR
-  const sub = karaoke
+  const sub = karaoke || pop
     ? `Style: Sub,${fontFamily()},${size},&H00FFFFFF,&H00FFFFFF,&H00000000,&H96000000,-1,0,0,0,100,100,0,0,1,6,3,2,${SAFE.left},${SAFE.right},${marginV},1`
     : `Style: Sub,${fontFamily()},${size},&H00FFFFFF,&H00FFFFFF,&H50000000,&H90000000,-1,-1,0,0,100,100,0,0,1,2.5,4,2,${SAFE.left},${SAFE.right},${marginV},1`;
   const head = `[Script Info]
@@ -86,8 +88,24 @@ ${sub}
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 `;
   const hi = assColor(accent); const lines = [];
-  for (const ph of phrases(words, karaoke ? { maxChars: 16 } : { maxWords: 4, maxChars: 20 })) {
-    const end = Math.min(dur, ph[ph.length - 1].end + 0.25);
+  const list = phrases(words, karaoke || pop ? { maxChars: 16 } : { maxWords: 4, maxChars: 20 });
+  for (const [pi, ph] of list.entries()) {
+    // a phrase stays 0.25s after its last word, but never overlaps the next phrase
+    const end = Math.min(dur, ph[ph.length - 1].end + 0.25, list[pi + 1] ? list[pi + 1][0].start : Infinity);
+    if (pop) {
+      // event i shows words 0..i; word i pops (60% -> 118% -> 100%) and is accent-coloured, the earlier ones are white
+      ph.forEach((w, i) => {
+        const e = i < ph.length - 1 ? ph[i + 1].start : end;
+        if (e <= w.start) return;
+        const shown = ph.slice(0, i + 1).map((x, k) => (k === i
+          ? `{\\c${hi}\\fscx60\\fscy60\\t(0,90,\\fscx118\\fscy118)\\t(90,170,\\fscx100\\fscy100)}${assText(x.word, true)}{\\r}`
+          : assText(x.word, true))).join(' ');
+        // invisible rest of the phrase keeps the line from jumping sideways as words are added
+        const rest = ph.slice(i + 1).map((x) => assText(x.word, true)).join(' ');
+        lines.push(`Dialogue: 0,${assTime(w.start)},${assTime(e)},Sub,,0,0,0,,${shown}${rest ? `{\\alpha&HFF&} ${rest}` : ''}`);
+      });
+      continue;
+    }
     if (!karaoke) {
       let t = ph.map((x) => assText(x.word)).join(' '); t = t.charAt(0).toLocaleUpperCase('uz') + t.slice(1);
       lines.push(`Dialogue: 0,${assTime(ph[0].start)},${assTime(end)},Sub,,0,0,0,,{\\fad(80,80)}${t}`);

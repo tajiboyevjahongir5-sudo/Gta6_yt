@@ -5,7 +5,8 @@ const { Readable } = require('stream');
 const { GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, PUBLIC_URL, SECRET } = require('./config');
 const { getSecret, setSecret, log } = require('./db');
 
-const SCOPES = ['https://www.googleapis.com/auth/youtube.upload', 'https://www.googleapis.com/auth/youtube.readonly'];
+// youtube = manage the channel (banner, description, keywords); upload + readonly for videos and stats
+const SCOPES = ['https://www.googleapis.com/auth/youtube', 'https://www.googleapis.com/auth/youtube.upload', 'https://www.googleapis.com/auth/youtube.readonly'];
 const redirectUri = () => `${PUBLIC_URL}/oauth/google/callback`;
 const configured = () => !!(GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET && PUBLIC_URL);
 
@@ -32,7 +33,7 @@ async function tokenRequest(params) {
 }
 async function finishAuth(code) {
   const t = await tokenRequest({ code, grant_type: 'authorization_code', redirect_uri: redirectUri() });
-  setSecret('yt', { refresh_token: t.refresh_token, access_token: t.access_token, expires_at: Date.now() + (t.expires_in - 60) * 1000 });
+  setSecret('yt', { refresh_token: t.refresh_token, access_token: t.access_token, scope: t.scope || '', expires_at: Date.now() + (t.expires_in - 60) * 1000 });
   const ch = await channelInfo(true);
   log(`YouTube kanal ulandi: ${ch?.title || '?'}`);
   return ch;
@@ -46,6 +47,8 @@ async function accessToken() {
   return t.access_token;
 }
 const connected = () => !!getSecret('yt')?.refresh_token;
+// channels connected before branding existed only granted upload/readonly
+const canBrand = () => (getSecret('yt')?.scope || '').split(' ').includes('https://www.googleapis.com/auth/youtube');
 function disconnect() { setSecret('yt', null); setSecret('channel', null); }
 
 async function api(pathAndQuery, opts = {}) {
@@ -113,4 +116,24 @@ async function videoStats(ids) {
   return out;
 }
 
-module.exports = { configured, connected, authUrl, checkState, finishAuth, disconnect, channelInfo, upload, setThumbnail, videoStats, fitTags };
+// banner + About text + keywords. channels.update replaces the whole brandingSettings part, so merge with what's there.
+async function applyBranding({ description, keywords, bannerFile }) {
+  if (!connected()) throw new Error('YouTube kanal ulanmagan');
+  if (!canBrand()) throw new Error('Kanalni qayta ulang: brend uchun "kanalni boshqarish" ruxsati kerak');
+  const cur = await api('channels?part=brandingSettings&mine=true');
+  const ch = cur.items?.[0]; if (!ch) throw new Error('Kanal topilmadi');
+  const bs = ch.brandingSettings || {}; bs.channel = bs.channel || {};
+  if (description) bs.channel.description = description.slice(0, 1000);
+  if (keywords?.length) bs.channel.keywords = keywords.map((k) => (/\s/.test(k) ? `"${k.replace(/"/g, '')}"` : k)).join(' ').slice(0, 500);
+  if (bannerFile) {
+    const r = await fetch('https://www.googleapis.com/upload/youtube/v3/channelBanners/insert?uploadType=media', {
+      method: 'POST', body: fs.readFileSync(bannerFile), headers: { authorization: 'Bearer ' + (await accessToken()), 'content-type': 'image/jpeg' } });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(`Banner yuklanmadi ${r.status}: ${j.error?.message || ''}`);
+    bs.image = { ...(bs.image || {}), bannerExternalUrl: j.url };
+  }
+  await api('channels?part=brandingSettings', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: ch.id, brandingSettings: bs }) });
+  return ch.id;
+}
+
+module.exports = { canBrand, applyBranding, configured, connected, authUrl, checkState, finishAuth, disconnect, channelInfo, upload, setThumbnail, videoStats, fitTags };

@@ -11,24 +11,27 @@ function getClient() {
   return client;
 }
 
-const LANG = { uz: "o'zbek (lotin)", ru: 'rus', en: 'ingliz' };
+const LANG = { uz: 'Uzbek (Latin script)', ru: 'Russian', en: 'English' };
+// emojis we can animate (rendered from Noto Color Emoji)
+const EMOJIS = ['😂', '💀', '🔥', '😱', '🚓', '💥', '💰', '🏎️', '🔫', '😍', '🤯', '😭', '👀', '🏃', '🤣', '😳'];
 const SCHEMA = {
   type: 'object', additionalProperties: false, required: ['moments', 'long'],
   properties: {
     moments: { type: 'array', items: { type: 'object', additionalProperties: false,
-      required: ['index', 'score', 'caption', 'short_title'],
+      required: ['index', 'score', 'caption', 'short_title', 'emoji'],
       properties: {
         index: { type: 'integer' },
-        score: { type: 'integer', description: '0-10, qanchalik qiziq/kulgili/epik' },
-        caption: { type: 'string', description: 'kompilyatsiyada ko\'rinadigan 2-5 so\'zli izoh' },
-        short_title: { type: 'string', description: 'Shorts uchun nom, 70 belgigacha, #shorts siz' },
+        score: { type: 'integer', description: '0-10: how funny / epic / unexpected it is for a viewer' },
+        caption: { type: 'string', description: '2-5 word caption shown in the compilation' },
+        short_title: { type: 'string', description: 'Shorts title, max 70 chars, without #shorts' },
+        emoji: { type: 'string', enum: EMOJIS, description: 'reaction emoji that pops up on the key moment' },
       } } },
     long: { type: 'object', additionalProperties: false, required: ['title', 'description', 'tags', 'thumb_text'],
       properties: {
-        title: { type: 'string', description: '100 belgigacha, clickbait emas, lekin qiziqtiradigan' },
-        description: { type: 'string', description: '3-6 qator: nima bo\'lishi, taym-kodlar alohida qo\'shiladi' },
+        title: { type: 'string', description: 'max 100 chars, intriguing but not misleading' },
+        description: { type: 'string', description: '3-6 lines about what happens; chapters are added separately' },
         tags: { type: 'array', items: { type: 'string' } },
-        thumb_text: { type: 'string', description: 'prevyudagi 2-4 so\'zli katta yozuv' },
+        thumb_text: { type: 'string', description: '2-4 word big text for the thumbnail' },
       } },
   },
 };
@@ -43,12 +46,12 @@ async function rankAndDescribe({ candidates, source, settings }) {
     for (const f of cand.frames) content.push({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: fs.readFileSync(f).toString('base64') } });
   });
   content.push({ type: 'text', text:
-    `Bu "${source.title || 'stream'}" (${source.author || 'nomaʼlum muallif'}) uzun ${settings.game} streamidan avtomatik topilgan lahzalar.\n` +
-    `Vazifa: 1) har bir lahzani 0-10 baholang (tomoshabin uchun qanchalik qiziq: kulgili, epik, kutilmagan, xaotik; ` +
-    `menyu, yuklanish ekrani, AFK, qora ekran, kamera/chat ko'rinmasa past ball). ` +
-    `2) Har biriga qisqa izoh va Shorts nomi yozing. 3) Kompilyatsiya video uchun YouTube nomi, tavsifi, 12-20 teg va prevyu yozuvini yozing.\n` +
-    `Til: ${LANG[settings.language] || settings.language}. Teglarga ${settings.game} bilan bog'liq ingliz tilidagi mashhur qidiruv so'zlarini ham qo'shing. ` +
-    `Kanal nomi: ${settings.channelName}. Original stream egasini kamsitmang, yolg'on va'da bermang.` });
+    `These moments were found automatically in a long ${settings.game} stream "${source.title || 'stream'}" by ${source.author || 'unknown'}.\n` +
+    `1) Score each moment 0-10 for a viewer (funny, epic, unexpected, chaotic score high; menus, loading screens, AFK, black screens score low). ` +
+    `2) Give each a short caption, a Shorts title and one reaction emoji. ` +
+    `3) Write the YouTube title, description, 12-20 tags and thumbnail text for the compilation video.\n` +
+    `Write everything in ${LANG[settings.language] || settings.language}. Tags should include popular ${settings.game} search terms. ` +
+    `Channel name: ${settings.channelName}. Do not mock the original streamer and do not promise things the video doesn't show.` });
 
   try {
     const res = await c.beta.messages.create({
@@ -80,4 +83,4 @@ function templateMeta({ source, settings, count }) {
   return { long: { title: t.title, description: t.desc, tags: [], thumb_text: t.thumb }, shortTitle: t.short };
 }
 
-module.exports = { rankAndDescribe, templateMeta, enabled: () => !!ANTHROPIC_API_KEY };
+module.exports = { rankAndDescribe, templateMeta, EMOJIS, getClient, LANG, enabled: () => !!ANTHROPIC_API_KEY };

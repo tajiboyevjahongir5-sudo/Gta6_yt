@@ -56,10 +56,12 @@ async function home() {
   $('#badgeDrafts').textContent = o.counts.drafts || '';
   const ch = o.channel && !o.channel.error ? o.channel : null;
   const warn = [];
-  if (!o.youtube.connected) warn.push(`YouTube kanal ulanmagan — <a href="#" data-go="settings" style="color:inherit">Sozlamalar</a>`);
+  const connectCta = !o.youtube.connected ? `<div class="card" style="text-align:center"><div style="font-size:30px">📺</div><b>YouTube kanalingizni ulang</b>
+    <p class="muted small">Videolar shu kanalga yuklanadi. Ulanganda kanal uchun nom, username, tavsif, banner va logo tayyorlab beriladi.</p>
+    <button class="btn primary" id="cta" style="width:100%">Kanalni ulash</button></div>` : '';
   if (!o.ai) warn.push('AI kaliti yo\'q: nom/tavsif shablondan olinadi');
   $('#view').innerHTML = `
-    ${warn.map((w) => `<div class="warnbox">${w}</div>`).join('')}
+    ${connectCta}${warn.map((w) => `<div class="warnbox">${w}</div>`).join('')}
     <div class="card"><div class="row"><input type="url" id="url" class="grow" placeholder="Stream yoki video havolasi (YouTube, Twitch, Kick)"><button class="btn primary" id="add">Qo'shish</button></div></div>
     <div class="grid">
       <div class="tile"><div class="v">${ch ? num(ch.subscribers) : '—'}</div><div class="l">Obunachilar</div></div>
@@ -75,6 +77,7 @@ async function home() {
     <h2>So'nggi hodisalar</h2>
     <div class="card">${o.logs.map((l) => `<div class="log ${l.level}"><b>${ago(l.ts)}</b> · ${esc(l.msg)}</div>`).join('') || '<div class="muted small">Hali hech narsa yo\'q</div>'}</div>`;
   $('#add').onclick = addUrl;
+  if ($('#cta')) $('#cta').onclick = connectYouTube;
   bindCommon();
   timer = setInterval(() => page === 'home' && !$('#url:focus') && home(), 8000);
 }
@@ -271,6 +274,8 @@ async function settings() {
     <div class="card">${o.youtube.connected && o.channel && !o.channel.error
       ? `<div class="row">${o.channel.thumb ? `<img src="${esc(o.channel.thumb)}" style="width:44px;height:44px;border-radius:50%">` : ''}<div class="grow"><b>${esc(o.channel.title)}</b><div class="muted small">${num(o.channel.subscribers)} obunachi · ${o.channel.videos} video</div></div><button class="btn sm danger" id="ytoff">Uzish</button></div>`
       : `<p class="muted small">${o.youtube.configured ? 'Kanalingizni ulang — videolar shu kanalga yuklanadi.' : 'Serverda GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET / PUBLIC_URL sozlanmagan (README).'}</p>${o.channel?.error ? `<div class="warnbox">${esc(o.channel.error)}</div>` : ''}<button class="btn primary" id="yton" ${o.youtube.configured ? '' : 'disabled'} style="width:100%">YouTube kanalni ulash</button>`}</div>
+    ${o.youtube.connected && !o.youtube.canBrand ? '<div class="warnbox">Brendni kanalga o\'rnatish uchun kanalni qayta ulang (yangi ruxsat kerak). <a href="#" id="reconn" style="color:inherit">Qayta ulash</a></div>' : ''}
+    <div class="card"><div class="row"><div style="font-size:28px">🎨</div><div class="grow"><b>Kanal brendi</b><div class="muted small">Nom, username, tavsif, banner va logo</div></div><button class="btn sm" id="brandBtn">Ochish</button></div></div>
     <h2>Nashr qilish</h2>
     <div class="card">
       ${sw('autoPublish', 'Avto-nashr', 'Yoqilsa, tasdiqlashsiz jadval bo\'yicha yuklanadi')}
@@ -285,16 +290,17 @@ async function settings() {
       <div class="row"><div class="grow">${inp('highlightCount', 'Lahzalar soni', 'number')}</div><div class="grow">${inp('targetMinutes', 'Video uzunligi (daq)', 'number')}</div></div>
       <div class="row"><div class="grow">${inp('shortsPerVideo', 'Har streamdan Shorts', 'number')}</div><div class="grow"><label class="f">Sifat</label><select data-k="quality">${[720, 1080].map((q) => `<option value="${q}" ${+s.quality === q ? 'selected' : ''}>${q}p</option>`).join('')}</select></div></div>
       <div class="row"><div class="grow">${inp('clipBefore', 'Lahzadan oldin (s)', 'number')}</div><div class="grow">${inp('clipAfter', 'Lahzadan keyin (s)', 'number')}</div></div>
+      ${sw('effects', 'Ovoz effektlari va emojilar', 'Whoosh, boom, pop + sakraydigan emojilar eng qiziq joylarda')}
       ${sw('subtitles', 'Shorts subtitrlari', 'So\'zma-so\'z, pastda, layk/koment tugmalari va tavsifdan chetda')}
-      <div class="row"><div class="grow"><label class="f">Subtitr uslubi</label><select data-k="subtitleStyle">${[['clean', 'Toza (kursiv, oq)'], ['karaoke', "Karaoke (sariq so'z)"]].map(([v, t]) => `<option value="${v}" ${s.subtitleStyle === v ? 'selected' : ''}>${t}</option>`).join('')}</select></div></div>
-      <div class="row"><div class="grow"><label class="f">Subtitr tili</label><select data-k="subtitleLang">${[['auto', 'Avtomatik'], ['uz', "O'zbekcha"], ['ru', 'Ruscha'], ['en', 'Inglizcha']].map(([v, t]) => `<option value="${v}" ${s.subtitleLang === v ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
+      <div class="row"><div class="grow"><label class="f">Subtitr uslubi</label><select data-k="subtitleStyle">${[['pop', "Pop (so'zlar ovozga mos chiqadi)"], ['clean', 'Toza (kursiv, oq)'], ['karaoke', "Karaoke (sariq so'z)"]].map(([v, t]) => `<option value="${v}" ${s.subtitleStyle === v ? 'selected' : ''}>${t}</option>`).join('')}</select></div></div>
+      <div class="row"><div class="grow"><label class="f">Streamer qaysi tilda gapiradi</label><select data-k="subtitleLang">${[['auto', 'Avtomatik'], ['uz', "O'zbekcha"], ['ru', 'Ruscha'], ['en', 'Inglizcha']].map(([v, t]) => `<option value="${v}" ${s.subtitleLang === v ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
       <div class="grow"><label class="f">Aniqlik</label><select data-k="whisperModel">${[['base', 'Tez'], ['small', "O'rtacha"], ['medium', 'Aniq (sekin)']].map(([v, t]) => `<option value="${v}" ${s.whisperModel === v ? 'selected' : ''}>${t}</option>`).join('')}</select></div></div>
       ${sw('keepSource', 'Asl videoni saqlash', 'O\'chiq bo\'lsa diskni tejash uchun o\'chiriladi')}
     </div>
     <h2>Nom, tavsif, teglar</h2>
     <div class="card">
       ${sw('useAI', 'AI yordamchi', o.ai ? 'Kadrlarni ko\'rib baholaydi va matnlarni yozadi' : 'ANTHROPIC_API_KEY sozlanmagan')}
-      <label class="f">Til</label><select data-k="language">${[['uz', "O'zbekcha"], ['ru', 'Ruscha'], ['en', 'Inglizcha']].map(([v, t]) => `<option value="${v}" ${s.language === v ? 'selected' : ''}>${t}</option>`).join('')}</select>
+      <label class="f">Video tili (nom, tavsif, teglar, subtitr)</label><select data-k="language">${[['en', 'Inglizcha'], ['ru', 'Ruscha'], ['uz', "O'zbekcha"]].map(([v, t]) => `<option value="${v}" ${s.language === v ? 'selected' : ''}>${t}</option>`).join('')}</select>
       ${inp('game', "O'yin nomi")}
       ${inp('channelName', 'Kanal nomi')}
       ${inp('defaultTags', 'Doimiy teglar (vergul bilan)')}
@@ -308,8 +314,60 @@ async function settings() {
       if (Array.isArray(s[k])) v = v.split(',').map((x) => x.trim()).filter(Boolean); else if (typeof s[k] === 'number') v = Number(v) || 0; patch[k] = v; });
     try { await api('/api/settings', { method: 'PATCH', body: patch }); haptic('medium'); toast('Saqlandi'); } catch (e) { toast(e.message); }
   };
-  if ($('#yton')) $('#yton').onclick = async () => { try { const { url } = await api('/api/youtube/auth'); tg?.openLink ? tg.openLink(url) : (location.href = url); } catch (e) { toast(e.message); } };
+  if ($('#yton')) $('#yton').onclick = connectYouTube;
+  if ($('#brandBtn')) $('#brandBtn').onclick = openBrand;
+  if ($('#reconn')) $('#reconn').onclick = (e) => { e.preventDefault(); connectYouTube(); };
   if ($('#ytoff')) $('#ytoff').onclick = async () => { if (confirm('Kanal uzilsinmi?')) { await api('/api/youtube/disconnect', { method: 'POST' }); settings(); } };
+}
+
+async function connectYouTube() {
+  try { const { url } = await api('/api/youtube/auth'); tg?.openLink ? tg.openLink(url) : (location.href = url); } catch (e) { toast(e.message); }
+}
+const copy = (t) => { navigator.clipboard?.writeText(t).then(() => toast('Nusxa olindi: ' + t.slice(0, 40)), () => toast(t)); haptic(); };
+
+async function openBrand() {
+  let k = await api('/api/brand'); const o = await api('/api/overview');
+  const draw = () => {
+    const v = Date.now();
+    $('#sheetBody').innerHTML = `<div class="row" style="margin-bottom:10px"><b class="grow">🎨 Kanal brendi</b><button class="icon" id="x">✕</button></div>
+    ${!k ? `<p class="muted small">AI kanalingiz uchun nom, @username, tavsif, kalit so'zlar, banner (2560×1440) va logo (800×800) tayyorlaydi.</p>` : ''}
+    <label class="f">Istaklaringiz (ixtiyoriy)</label><input type="text" id="hint" placeholder="masalan: qisqa, kulgili, 'Vice' so'zi bo'lsin">
+    <button class="btn ${k ? '' : 'primary'}" id="gen" style="width:100%;margin-top:8px">${k ? '🔄 Qaytadan yaratish' : '✨ Brend yaratish'}</button>
+    ${k ? `
+      <h2>Nom</h2><div class="chips">${k.names.map((n) => `<span data-copy="${esc(n)}" style="cursor:pointer;${n === k.chosen ? 'outline:2px solid var(--accent)' : ''}">${esc(n)}</span>`).join('')}</div>
+      <h2>Username</h2><div class="chips">${k.handles.map((h) => `<span data-copy="@${esc(h)}" style="cursor:pointer">@${esc(h)}</span>`).join('')}</div>
+      <p class="muted small">Bosing — nusxa olinadi. Username band bo'lsa keyingisini sinang.</p>
+      <h2>Banner</h2>${k.hasBanner ? `<img src="/media/brand/banner?t=${encodeURIComponent(token)}&v=${v}" style="width:100%;border-radius:10px">` : ''}
+      <div class="row"><div class="grow"><label class="f">Banner yozuvi</label><input type="text" id="bt" value="${esc(k.banner_title)}"></div></div>
+      <label class="f">Banner pastki yozuvi</label><input type="text" id="bs" value="${esc(k.banner_subtitle)}">
+      <h2>Logo</h2><div class="row"><img src="/media/brand/logo?t=${encodeURIComponent(token)}&v=${v}" style="width:110px;height:110px;border-radius:50%"><div class="grow"><label class="f">Logo harflari</label><input type="text" id="lt" maxlength="2" value="${esc(k.logo_text)}"></div></div>
+      <h2>Tavsif</h2><textarea id="bd" style="min-height:180px">${esc(k.description)}</textarea>
+      <label class="f">Kalit so'zlar</label><textarea id="bk" style="min-height:60px">${esc(k.keywords.join(', '))}</textarea>
+      <button class="btn" id="bsave" style="width:100%;margin-top:10px">Saqlash va rasmlarni yangilash</button>
+      <h2>Kanalga o'rnatish</h2>
+      <button class="btn primary" id="apply" style="width:100%" ${o.youtube.connected ? '' : 'disabled'}>⬆️ Banner, tavsif va kalit so'zlarni o'rnatish</button>
+      ${o.youtube.connected ? '' : '<p class="muted small">Avval kanalni ulang.</p>'}
+      <div class="card" style="margin-top:10px"><b>Qo'lda (YouTube API ruxsat bermaydi):</b>
+        <ol class="small muted" style="padding-left:18px;margin:6px 0">
+          <li>Nom va @username — yuqoridan nusxa oling</li>
+          <li>Logo — <a href="/media/brand/logo?t=${encodeURIComponent(token)}" download="logo.png" style="color:var(--blue)">yuklab oling</a></li>
+          <li>YouTube Studio → Moslashtirish → Profil: nom, username va rasmni o'rnating</li></ol>
+        ${o.channel?.id ? `<a class="btn sm" href="https://studio.youtube.com/channel/${o.channel.id}/editing/profile" target="_blank">YouTube Studio'ni ochish ↗</a>` : ''}
+        <a class="btn sm" href="/media/brand/banner?t=${encodeURIComponent(token)}" download="banner.jpg">⬇️ Banner</a></div>` : ''}`;
+    $('#x').onclick = closeSheet;
+    $('#gen').onclick = async (e) => { e.target.disabled = true; e.target.textContent = 'Yaratilmoqda… (~20 s)';
+      try { k = await api('/api/brand/generate', { method: 'POST', body: { hint: $('#hint').value } }); haptic('medium'); draw(); } catch (er) { toast(er.message); e.target.disabled = false; } };
+    document.querySelectorAll('[data-copy]').forEach((el) => (el.onclick = () => copy(el.dataset.copy)));
+    if (!k) return;
+    $('#bsave').onclick = async (e) => { e.target.disabled = true;
+      try { k = await api('/api/brand', { method: 'PATCH', body: { banner_title: $('#bt').value, banner_subtitle: $('#bs').value, logo_text: $('#lt').value,
+        description: $('#bd').value, keywords: $('#bk').value.split(',').map((x) => x.trim()).filter(Boolean) } }); toast('Saqlandi'); draw(); } catch (er) { toast(er.message); e.target.disabled = false; } };
+    $('#apply').onclick = async (e) => { e.target.disabled = true; e.target.textContent = 'O\'rnatilmoqda…';
+      try { await api('/api/brand', { method: 'PATCH', body: { description: $('#bd').value, keywords: $('#bk').value.split(',').map((x) => x.trim()).filter(Boolean) } });
+        await api('/api/brand/apply', { method: 'POST' }); haptic('medium'); toast('✅ Kanalga o\'rnatildi'); e.target.textContent = '✅ O\'rnatildi'; }
+      catch (er) { toast(er.message); e.target.disabled = false; e.target.textContent = '⬆️ Qayta urinish'; } };
+  };
+  draw(); $('#sheet').classList.remove('hidden');
 }
 
 (async () => { try { if (!token) await login(); go('home'); } catch (e) { showLogin(e.message); } })();

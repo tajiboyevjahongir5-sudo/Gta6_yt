@@ -9,6 +9,7 @@ const pipeline = require('./src/pipeline');
 const yt = require('./src/youtube');
 const tg = require('./src/telegram');
 const ai = require('./src/ai');
+const brand = require('./src/brand');
 const { run, dayKey, fmtTime } = require('./src/util');
 
 const PUBLIC = path.join(__dirname, 'public');
@@ -58,7 +59,7 @@ async function overview() {
   const todayStart = Date.parse(dayKey() + 'T00:00:00Z') - 5 * 3600000;
   const s = getSettings();
   return {
-    channel, youtube: { configured: yt.configured(), connected: yt.connected() }, ai: ai.enabled(), bot: tg.enabled(),
+    channel, youtube: { configured: yt.configured(), connected: yt.connected(), canBrand: yt.canBrand() }, ai: ai.enabled(), bot: tg.enabled(),
     counts: {
       queue: count("SELECT COUNT(*) n FROM jobs WHERE status IN ('queued','downloading','analyzing','rendering','waiting')"),
       drafts: count("SELECT COUNT(*) n FROM clips WHERE status = 'draft'"),
@@ -181,6 +182,17 @@ async function api(req, res, url) {
 
   if (p === '/api/settings' && m === 'GET') return send(res, 200, getSettings());
   if (p === '/api/settings' && m === 'PATCH') { const clean = {}; for (const k of Object.keys(b)) if (!k.startsWith('_')) clean[k] = b[k]; return send(res, 200, setSettings(clean)); }
+  if (p === '/api/brand' && m === 'GET') return send(res, 200, brand.get());
+  if (p === '/api/brand' && m === 'PATCH') { try { return send(res, 200, await brand.update(b)); } catch (e) { return send(res, 400, { error: e.message }); } }
+  if (p === '/api/brand/generate' && m === 'POST') return send(res, 200, await brand.generate({ hint: String(b.hint || '').slice(0, 300) }));
+  if (p === '/api/brand/apply' && m === 'POST') {
+    const k = brand.get(); if (!k) return send(res, 400, { error: 'Avval brend yarating' });
+    try {
+      const id = await yt.applyBranding({ description: k.description, keywords: k.keywords, bannerFile: b.banner !== false && k.hasBanner ? brand.files().banner : null });
+      log('Kanalga banner, tavsif va kalit so\'zlar o\'rnatildi');
+      return send(res, 200, { ok: true, studio: `https://studio.youtube.com/channel/${id}/editing/profile` });
+    } catch (e) { return send(res, 400, { error: e.message }); }
+  }
   if (p === '/api/youtube/auth') {
     if (!yt.configured()) return send(res, 400, { error: 'GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET va PUBLIC_URL sozlanmagan' });
     return send(res, 200, { url: yt.authUrl() });
@@ -202,6 +214,11 @@ const server = http.createServer(async (req, res) => {
         const ch = await yt.finishAuth(url.searchParams.get('code'));
         msg = `✅ Kanal ulandi: ${ch?.title || ''}`;
         tg.notifyAdmins(`✅ YouTube kanal ulandi: <b>${tg.escHtml(ch?.title || '')}</b>`);
+        // first connection: prepare the channel brand kit right away and send it to the bot
+        if (!brand.get()) brand.generate().then(async (k) => {
+          await tg.sendPhotoToAdmins(brand.files().banner, `🎨 Kanal brendi tayyor\n\n<b>Nom variantlari:</b> ${k.names.map(tg.escHtml).join(' · ')}\n<b>Username:</b> ${k.handles.map((h) => '@' + h).join(' · ')}\n\nPanel → ⚙️ → Kanal brendi: tahrirlash va kanalga o'rnatish`);
+          await tg.sendPhotoToAdmins(brand.files().logo, 'Logo (800×800)');
+        }).catch((e) => log('Brend yaratilmadi: ' + e.message, 'warn'));
       } catch (e) { msg = '❌ ' + e.message; }
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
       return res.end(`<!doctype html><meta name=viewport content="width=device-width"><body style="font:18px system-ui;background:#0d0f14;color:#fff;display:grid;place-items:center;height:90vh;text-align:center"><div>${msg.replace(/</g, '&lt;')}<p style="opacity:.6">Bu oynani yopib, Telegramga qayting.</p></div>`);
@@ -212,6 +229,10 @@ const server = http.createServer(async (req, res) => {
       const c = db.prepare('SELECT file, thumb FROM clips WHERE id = ?').get(+mm[1]);
       if (!c) { res.writeHead(404); return res.end(); }
       return serveFile(req, res, mm[2] === 'video' ? c.file : c.thumb);
+    }
+    if ((mm = url.pathname.match(/^\/media\/brand\/(banner|logo)$/))) {
+      if (!checkToken(url.searchParams.get('t'))) { res.writeHead(401); return res.end(); }
+      return serveFile(req, res, brand.files()[mm[1]]);
     }
     const f = path.normalize(path.join(PUBLIC, url.pathname === '/' ? 'index.html' : url.pathname));
     if (!f.startsWith(PUBLIC)) { res.writeHead(403); return res.end(); }

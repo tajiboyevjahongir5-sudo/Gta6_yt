@@ -17,7 +17,10 @@ Havola / kuzatilgan kanal ─► yuklab olish (yt-dlp) ─► tahlil: ovoz + har
 | **Lahza qidirish** | Har soniyaning ovoz balandligi (qichqiriq, kulgi, portlash) va sahna o'zgarishlari (quvish, avariya) bo'yicha ball. 6 soatlik efir ham bir necha daqiqada tahlil qilinadi |
 | **AI** (ixtiyoriy) | Claude har bir nomzod lahzadan kadrlarni ko'rib 0–10 baho beradi (menyu, yuklanish ekrani, AFK — past ball), izoh, nom, tavsif, 12–20 teg va prevyu yozuvini yozadi. Til: o'zbek / rus / ingliz |
 | **Montaj** | 16:9 kompilyatsiya (raqamlangan lahzalar, silliq o'tishlar, ovoz −14 LUFS ga tenglashtiriladi), 9:16 Shorts (xira fon, kattalashtirilgan o'yin, subtitr) |
-| **Subtitr** (Shorts) | Nutq so'zma-so'z yoziladi (faster-whisper, o'zbek/rus/ingliz), aytilayotgan so'z sariq bo'lib ajralib turadi. Joylashuvi YouTube interfeysiga moslangan — pastga qarang |
+| **Til** | Hammasi **inglizcha**: nom, tavsif, teglar, taym-kodlar, subtitr. Streamer boshqa tilda gapirsa, Whisper nutqni inglizchaga tarjima qiladi (Sozlamalarda o'zgartirish mumkin) |
+| **Subtitr** (Shorts) | "Pop" uslubi: har bir so'z aynan aytilganda sakrab chiqadi, oxirgisi sariq. Yana "Toza" (kursiv) va "Karaoke" uslublari. Joylashuvi YouTube interfeysiga moslangan — pastga qarang |
+| **Effektlar** | Ovoz effektlari: o'tishda *whoosh*, eng qiziq lahzada *boom*, emoji chiqqanda *pop* (ffmpeg'da sintez qilinadi — mualliflik muammosi yo'q; o'zingiznikini `data/sfx/boom.wav` va h.k. qilib qo'ysangiz o'shalar ishlatiladi). Animatsion emojilar (😂💀🔥😱🚓💥…): sakrab chiqadi, tebranadi, yo'qoladi; AI har lahzaga mosini tanlaydi, subtitrdagi so'zlar ham emoji chaqiradi ("cops" → 🚓, "lol" → 😂) |
+| **Kanal brendi** | 5 ta nom, 5 ta @username, SEO tavsif, kalit so'zlar, banner 2560×1440 (matn YouTube xavfsiz zonasida) va logo 800×800. Kanal ulanganda avtomatik tayyorlanib botga keladi. Banner, tavsif va kalit so'zlar bir tugma bilan kanalga o'rnatiladi; nom, username va logoni YouTube API o'zgartirishga ruxsat bermaydi — ular nusxa olish/yuklab olish tugmalari bilan beriladi |
 | **Prevyu** | 1280×720, eng kuchli kadr, to'yingan ranglar, katta qalin yozuv, "GTA 6" belgisi. Panelda yozuvni o'zgartirib qayta chizish mumkin |
 | **Tavsif** | AI matni + avtomatik taym-kodlar (YouTube bo'limlari) + original stream muallifi havolasi + sizning doimiy oxiringiz |
 | **Nashr** | Tasdiqlab yoki avto-rejimda; belgilangan vaqtlarda (masalan 13:00 va 19:00), kunlik limit bilan |
@@ -33,7 +36,7 @@ Joylashuv haqiqiy telefon skrinshotidan o'lchangan (YouTube ilovasi, 2026). 1080
 | Qidiruv maslahati, @kanal + Subscribe, nom | y ≥ 1634 | subtitr y≈1400 da tugaydi (234px zaxira) |
 
 Tartib (mashhur GTA edit Shorts'lar kabi): xira fon ustida o'yin kadri (y 430–1430, kattalashtirilgan), uning pastki qismida subtitr.
-Videoning o'ziga boshqa yozuv qo'shilmaydi — nom YouTube'ning nom maydonida chiqadi. Uslub: **Toza** (kursiv, oq, yumshoq soya) yoki **Karaoke** (qalin, aytilayotgan so'z sariq).
+Videoning o'ziga boshqa yozuv qo'shilmaydi — nom YouTube'ning nom maydonida chiqadi. Uslub: **Pop** (so'zlar ovozga mos chiqadi), **Toza** (kursiv, oq) yoki **Karaoke** (qalin, aytilayotgan so'z sariq). Emojilar kadrning yuqori qismida, tugmalar ustuniga tushmaydi.
 Panel → Kliplar → Shorts → **"📐 YouTube interfeysini ko'rsatish"** — tugmalar va tavsif qayerga tushishini video ustida ko'rasiz.
 
 ### Web App sahifalari
@@ -42,7 +45,7 @@ Panel → Kliplar → Shorts → **"📐 YouTube interfeysini ko'rsatish"** — 
 - **Kliplar** — videoni ko'rish, nom/tavsif/teg/prevyu tahriri, tasdiqlash, "hozir yuklash", rad etish
 - **Statistika** — 7/30/90 kunlik grafiklar va top videolar
 - **Manbalar** — kuzatiladigan kanallar, filtr, mualliflik
-- **Sozlamalar** (⚙️) — YouTube ulash, jadval, montaj, til, teglar, prevyu rangi
+- **Sozlamalar** (⚙️) — YouTube kanalni ulash (yoki Asosiy sahifadagi katta tugma), 🎨 Kanal brendi, jadval, montaj, effektlar, subtitr, til, teglar
 
 ### Bot buyruqlari
 Havola yuborish — navbatga qo'shadi · `/navbat` · `/kliplar` · `/stat` · `/yordam`.
@@ -71,7 +74,8 @@ Docker'siz: Node 22.13+, `ffmpeg`, `yt-dlp`, subtitr uchun `pip install faster-w
 1. [Google Cloud Console](https://console.cloud.google.com/) → yangi loyiha → **YouTube Data API v3** ni yoqing.
 2. **OAuth consent screen**: External, o'z emailingizni *Test users* ga qo'shing.
 3. **Credentials → OAuth client ID → Web application**, redirect URI: `https://SIZNING-DOMEN/oauth/google/callback`.
-4. Client ID / Secret ni `.env` ga yozing, Panel → ⚙️ → **YouTube kanalni ulash**.
+4. Client ID / Secret ni `.env` ga yozing, Panel → **Kanalni ulash**. Ruxsatlar: video yuklash, statistika va kanalni boshqarish (banner/tavsif uchun).
+   Avval ulangan bo'lsangiz, brendni o'rnatish uchun bir marta qayta ulang.
 5. Kanalni telefon orqali tasdiqlang (youtube.com/verify) — aks holda maxsus prevyu va 15 daqiqadan uzun video yuklab bo'lmaydi.
 
 > **Muhim:** Google API limiti kuniga 10 000 birlik, bitta yuklash ≈ 1600 → **kuniga ~6 video**. Ko'proq kerak bo'lsa

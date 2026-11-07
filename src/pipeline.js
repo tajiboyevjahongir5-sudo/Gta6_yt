@@ -51,7 +51,7 @@ function chooseMoments(candidates, aiRes, settings) {
   const scored = candidates.map((c, i) => {
     const a = byIdx.get(i);
     const final = a ? (a.score / 10) * 0.7 + (c.score / maxAudio) * 0.3 : c.score / maxAudio;
-    return { ...c, final: Number(final.toFixed(3)), caption: a?.caption || '', shortTitle: a?.short_title || '', aiScore: a?.score ?? null };
+    return { ...c, final: Number(final.toFixed(3)), caption: a?.caption || '', shortTitle: a?.short_title || '', emoji: a?.emoji || '', aiScore: a?.score ?? null };
   }).filter((c) => c.aiScore === null || c.aiScore >= 3).sort((a, b) => b.final - a.final);
   const picked = []; let total = 0;
   for (const c of scored) {
@@ -107,10 +107,10 @@ async function processJob(job) {
   let done = 0;
   if (settings.makeLong && picked.length >= 3) {
     const out = path.join(outDir, 'compilation.mp4');
-    await render.renderCompilation(src, picked, out, dir, (p) => setJob(job.id, { progress: (done + p) / totalSteps }));
+    await render.renderCompilation(src, picked, out, dir, (p) => setJob(job.id, { progress: (done + p) / totalSteps }), { effects: settings.effects });
     const ordered = [...picked].sort((a, b) => a.start - b.start);
-    let t = 0; const chapters = ordered.map((s, i) => { const line = `${fmtTime(t)} ${s.caption || 'Lahza #' + (i + 1)}`; t += s.end - s.start; return line; });
-    const description = [long.description, '', '⏱ Taym-kodlar:', ...chapters, '', creditLine(job), '', settings.descriptionFooter].filter((x) => x !== undefined).join('\n');
+    let t = 0; const chapters = ordered.map((s, i) => { const line = `${fmtTime(t)} ${s.caption || (settings.language === 'uz' ? 'Lahza #' : 'Moment #') + (i + 1)}`; t += s.end - s.start; return line; });
+    const description = [long.description, '', settings.language === 'uz' ? '⏱ Taym-kodlar:' : settings.language === 'ru' ? '⏱ Таймкоды:' : '⏱ Chapters:', ...chapters, '', creditLine(job), '', settings.descriptionFooter].filter((x) => x !== undefined).join('\n');
     const best = picked[0];
     const thumb = path.join(outDir, 'compilation.jpg');
     await render.renderThumbnail(src, best.peak - 1, long.thumb_text, thumb, dir, { accent: settings.accent, badge: settings.game });
@@ -121,8 +121,8 @@ async function processJob(job) {
     for (let i = 0; i < Math.min(settings.shortsPerVideo, picked.length); i++) {
       const s = picked[i]; const title = s.shortTitle || tpl.shortTitle(i);
       const out = path.join(outDir, `short_${i + 1}.mp4`); const thumb = path.join(outDir, `short_${i + 1}.jpg`);
-      const words = settings.subtitles ? await subs.transcribe(src, s.start, Math.min(58, s.end - s.start), dir, { model: settings.whisperModel, lang: settings.subtitleLang }) : [];
-      await render.renderShort(src, s, out, dir, { words, accent: settings.accent, style: settings.subtitleStyle });
+      const words = settings.subtitles ? await subs.transcribe(src, s.start, Math.min(58, s.end - s.start), dir, { model: settings.whisperModel, lang: settings.subtitleLang, to: settings.language === 'en' ? 'en' : '' }) : [];
+      await render.renderShort(src, s, out, dir, { words, accent: settings.accent, style: settings.subtitleStyle, emoji: s.emoji, effects: settings.effects });
       await render.grabFrame(out, 1.5, thumb, 540);
       const description = [title, '', creditLine(job), '', `#shorts #${settings.game.replace(/\s+/g, '')} #gaming`].join('\n');
       const r = ins.run(job.id, 'short', out, thumb, JSON.stringify([s]), Math.min(58, s.end - s.start), s.final,

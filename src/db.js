@@ -40,18 +40,19 @@ const DEFAULTS = {
   targetMinutes: 10,           // compilation length goal
   clipBefore: 12, clipAfter: 8, // seconds kept around each peak
   quality: 720,                // download height (720 is fast, 1080 looks better)
-  language: 'uz',              // metadata language: uz | ru | en
+  language: 'en',              // video language: titles, descriptions, tags, subtitles (en = speech translated to English)
   game: 'GTA 6',
   channelName: 'Lahza',
-  defaultTags: ['GTA 6', 'GTA VI', 'GTA 6 gameplay', 'GTA 6 funny moments', 'GTA 6 uzbek'],
-  descriptionFooter: "🔔 Obuna bo'ling — har kuni eng zo'r GTA 6 lahzalari!\n#GTA6 #GTAVI #gaming",
+  defaultTags: ['GTA 6', 'GTA VI', 'GTA 6 gameplay', 'GTA 6 funny moments', 'GTA 6 highlights'],
+  descriptionFooter: '🔔 Subscribe for the best GTA 6 moments every day!\n#GTA6 #GTAVI #gaming',
   accent: '#FFD400',           // thumbnail text colour
   keepSource: false,           // delete downloaded stream after rendering
   useAI: true,
   subtitles: true,             // word-by-word captions on Shorts (needs python3 + faster-whisper)
   whisperModel: 'small',       // tiny | base | small | medium (bigger = more accurate, slower)
-  subtitleLang: 'auto',        // auto | uz | ru | en
-  subtitleStyle: 'clean',      // clean (italic white, like popular GTA edits) | karaoke (bold caps, spoken word yellow)
+  subtitleLang: 'auto',        // language the streamer SPEAKS: auto | uz | ru | en
+  subtitleStyle: 'pop',        // pop (words appear as spoken, bouncy) | clean (italic white phrase) | karaoke (bold caps, spoken word yellow)
+  effects: true,               // sound effects + animated emojis
 };
 function getSettings() {
   const s = { ...DEFAULTS };
