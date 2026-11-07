@@ -58,7 +58,7 @@ Video montaj kuchli protsessor va disk talab qiladi, shuning uchun bepul hosting
 Tavsiya: 4 vCPU / 8 GB RAM / 160 GB disk VPS (Hetzner CX32 / CPX31 ~ 8–15 €/oy) + Docker.
 
 ```bash
-git clone <repo> && cd <repo>/lahza
+git clone https://github.com/tajiboyevjahongir5-sudo/Gta6_yt.git && cd Gta6_yt
 cp .env.example .env   # va to'ldiring (pastda)
 docker compose up -d --build
 ```
@@ -102,7 +102,7 @@ Barqaror daromad uchun:
 
 ## Tuzilishi
 ```
-lahza/
+Gta6_yt/
   server.js        HTTP API, Web App, bot buyruqlari, OAuth callback
   src/pipeline.js  navbat, ishlov berish, jadval, yuklash, statistika, manbalarni kuzatish
   src/analyze.js   ovoz/harakat bo'yicha lahzalarni topish
