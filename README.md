@@ -36,6 +36,9 @@ Joylashuv haqiqiy telefon skrinshotidan o'lchangan (YouTube ilovasi, 2026). 1080
 | Yurak, koment, saqlash, ulashish, remiks | x ≥ 935, y ≥ 1026 | subtitr x 160–920 oralig'ida, markazda |
 | Qidiruv maslahati, @kanal + Subscribe, nom | y ≥ 1634 | subtitr y≈1400 da tugaydi (234px zaxira) |
 
+**Streamer webkamerasi** bo'lsa (bir xil yuz, bir xil joyda — OpenCV bilan 24 kadrdan aniqlanadi, ramkasi bo'yicha aniq kesiladi):
+tepada kamera (1080×640), ingichka rangli chiziq, pastda o'yin (1080×1280). Kamera bo'lmasa —
+
 Tartib (mashhur edit Shorts'lar kabi): xira fon ustida o'yin kadri (y 430–1430, kattalashtirilgan), uning pastki qismida subtitr.
 Videoning o'ziga boshqa yozuv qo'shilmaydi — nom YouTube'ning nom maydonida chiqadi. Uslub: **Pop** (so'zlar ovozga mos chiqadi), **Toza** (kursiv, oq) yoki **Karaoke** (qalin, aytilayotgan so'z sariq). Emojilar kadrning yuqori qismida, tugmalar ustuniga tushmaydi.
 Panel → Kliplar → Shorts → **"📐 YouTube interfeysini ko'rsatish"** — tugmalar va tavsif qayerga tushishini video ustida ko'rasiz.

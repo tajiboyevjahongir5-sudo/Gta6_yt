@@ -356,7 +356,9 @@ async function settings() {
       <div class="row"><div class="grow">${inp('highlightCount', 'Lahzalar soni', 'number')}</div><div class="grow">${inp('targetMinutes', 'Video uzunligi (daq)', 'number')}</div></div>
       <div class="row"><div class="grow">${inp('shortsPerVideo', 'Har streamdan Shorts', 'number')}</div><div class="grow"><label class="f">Sifat</label><select data-k="quality">${[[720, '720p (tez)'], [1080, '1080p'], [1440, '1440p (eng yuqori)']].map(([q, t]) => `<option value="${q}" ${+s.quality === q ? 'selected' : ''}>${t}</option>`).join('')}</select></div></div>
       <div class="row"><div class="grow">${inp('clipBefore', 'Lahzadan oldin (s)', 'number')}</div><div class="grow">${inp('clipAfter', 'Lahzadan keyin (s)', 'number')}</div></div>
-      ${sw('effects', 'Ovoz effektlari va emojilar', 'Whoosh, boom, pop + sakraydigan emojilar eng qiziq joylarda')}
+      ${sw('facecamLayout', 'Webkamera tepada (Shorts)', 'Videoda streamer kamerasi bo\'lsa: tepada kamera, pastda o\'yin. Kamera bo\'lmasa oddiy ko\'rinish')}
+      ${sw('effects', 'Ovoz effektlari', 'Whoosh, boom — eng qiziq joylarda')}
+      ${sw('emojis', 'Animatsion emojilar', 'Video ustida sakraydigan emojilar')}
       ${sw('subtitles', 'Shorts subtitrlari', 'So\'zma-so\'z, pastda, layk/koment tugmalari va tavsifdan chetda')}
       <div class="row"><div class="grow"><label class="f">Subtitr uslubi</label><select data-k="subtitleStyle">${[['pop', "Pop (so'zlar ovozga mos chiqadi)"], ['clean', 'Toza (kursiv, oq)'], ['karaoke', "Karaoke (sariq so'z)"]].map(([v, t]) => `<option value="${v}" ${s.subtitleStyle === v ? 'selected' : ''}>${t}</option>`).join('')}</select></div></div>
       <div class="row"><div class="grow"><label class="f">Streamer qaysi tilda gapiradi</label><select data-k="subtitleLang">${[['auto', 'Avtomatik'], ['uz', "O'zbekcha"], ['ru', 'Ruscha'], ['en', 'Inglizcha']].map(([v, t]) => `<option value="${v}" ${s.subtitleLang === v ? 'selected' : ''}>${t}</option>`).join('')}</select></div>

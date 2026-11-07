@@ -122,4 +122,10 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
   return head + lines.join('\n') + '\n';
 }
 
-module.exports = { SAFE, transcribe, buildAss, phrases, fontFamily };
+const FACECAM = path.join(__dirname, '..', 'scripts', 'facecam.py');
+async function detectFacecam(src) {
+  try { const { out } = await run(PY, [FACECAM, src], { timeoutMs: 10 * 60000 }); const j = JSON.parse(out); return j.found ? j : null; }
+  catch (e) { log('Webkamera aniqlanmadi: ' + e.message.slice(0, 200), 'warn'); return null; }
+}
+
+module.exports = { detectFacecam, SAFE, transcribe, buildAss, phrases, fontFamily };

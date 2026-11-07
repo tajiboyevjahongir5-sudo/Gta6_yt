@@ -60,7 +60,9 @@ const DEFAULTS = {
   whisperModel: 'small',       // tiny | base | small | medium (bigger = more accurate, slower)
   subtitleLang: 'auto',        // language the streamer SPEAKS: auto | uz | ru | en
   subtitleStyle: 'pop',        // pop (words appear as spoken, bouncy) | clean (italic white phrase) | karaoke (bold caps, spoken word yellow)
-  effects: true,               // sound effects + animated emojis
+  effects: true,               // sound effects (whoosh, boom, pop)
+  emojis: false,               // animated emoji reactions on top of the video
+  facecamLayout: true,         // streamer webcam detected -> Shorts with the webcam on top, gameplay below
 };
 function getSettings() {
   const s = { ...DEFAULTS };

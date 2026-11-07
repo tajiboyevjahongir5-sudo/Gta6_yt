@@ -12,15 +12,27 @@ ap.add_argument("--lang", default="auto")
 ap.add_argument("--to", default="")
 a = ap.parse_args()
 
+import wave
+import numpy as np
 from faster_whisper import WhisperModel
+
+# The caller hands us a 16 kHz mono WAV made by ffmpeg. Load it ourselves instead of letting faster-whisper decode it
+# with PyAV: newer PyAV releases dropped an argument faster-whisper passes ("metadata_errors") and decoding fails.
+def load_audio(path):
+    with wave.open(path, "rb") as w:
+        if w.getframerate() != 16000 or w.getnchannels() != 1 or w.getsampwidth() != 2:
+            raise SystemExit("expected 16 kHz mono 16-bit wav")
+        pcm = np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16)
+    return pcm.astype(np.float32) / 32768.0
 
 model = WhisperModel(a.model, device="cpu", compute_type="int8")
 opts = dict(word_timestamps=True, vad_filter=True, beam_size=5)  # vad: skip game noise / music with no speech
-segments, info = model.transcribe(a.media, language=None if a.lang == "auto" else a.lang, **opts)
+audio = load_audio(a.media)
+segments, info = model.transcribe(audio, language=None if a.lang == "auto" else a.lang, **opts)
 task = "transcribe"
 if a.to == "en" and info.language != "en":
     # Whisper's built-in speech -> English translation
-    segments, _ = model.transcribe(a.media, language=info.language, task="translate", **opts)
+    segments, _ = model.transcribe(audio, language=info.language, task="translate", **opts)
     task = "translate"
 words = []
 for seg in segments:
