@@ -287,7 +287,6 @@ async function settings() {
       <div class="row"><div class="grow">${inp('clipBefore', 'Lahzadan oldin (s)', 'number')}</div><div class="grow">${inp('clipAfter', 'Lahzadan keyin (s)', 'number')}</div></div>
       ${sw('subtitles', 'Shorts subtitrlari', 'So\'zma-so\'z, pastda, layk/koment tugmalari va tavsifdan chetda')}
       <div class="row"><div class="grow"><label class="f">Subtitr uslubi</label><select data-k="subtitleStyle">${[['clean', 'Toza (kursiv, oq)'], ['karaoke', "Karaoke (sariq so'z)"]].map(([v, t]) => `<option value="${v}" ${s.subtitleStyle === v ? 'selected' : ''}>${t}</option>`).join('')}</select></div></div>
-      ${sw('watermark', 'Kanal nomi subtitr ustida', 'Kichik yozuv — Shorts\'ingizni boshqalar ko\'chirsa ham sizniki ekani ko\'rinadi')}
       <div class="row"><div class="grow"><label class="f">Subtitr tili</label><select data-k="subtitleLang">${[['auto', 'Avtomatik'], ['uz', "O'zbekcha"], ['ru', 'Ruscha'], ['en', 'Inglizcha']].map(([v, t]) => `<option value="${v}" ${s.subtitleLang === v ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
       <div class="grow"><label class="f">Aniqlik</label><select data-k="whisperModel">${[['base', 'Tez'], ['small', "O'rtacha"], ['medium', 'Aniq (sekin)']].map(([v, t]) => `<option value="${v}" ${s.whisperModel === v ? 'selected' : ''}>${t}</option>`).join('')}</select></div></div>
       ${sw('keepSource', 'Asl videoni saqlash', 'O\'chiq bo\'lsa diskni tejash uchun o\'chiriladi')}

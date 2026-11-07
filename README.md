@@ -16,7 +16,7 @@ Havola / kuzatilgan kanal ─► yuklab olish (yt-dlp) ─► tahlil: ovoz + har
 |---|---|
 | **Lahza qidirish** | Har soniyaning ovoz balandligi (qichqiriq, kulgi, portlash) va sahna o'zgarishlari (quvish, avariya) bo'yicha ball. 6 soatlik efir ham bir necha daqiqada tahlil qilinadi |
 | **AI** (ixtiyoriy) | Claude har bir nomzod lahzadan kadrlarni ko'rib 0–10 baho beradi (menyu, yuklanish ekrani, AFK — past ball), izoh, nom, tavsif, 12–20 teg va prevyu yozuvini yozadi. Til: o'zbek / rus / ingliz |
-| **Montaj** | 16:9 kompilyatsiya (raqamlangan lahzalar, silliq o'tishlar, ovoz −14 LUFS ga tenglashtiriladi), 9:16 Shorts (xira fon, kattalashtirilgan o'yin, katta sarlavha) |
+| **Montaj** | 16:9 kompilyatsiya (raqamlangan lahzalar, silliq o'tishlar, ovoz −14 LUFS ga tenglashtiriladi), 9:16 Shorts (xira fon, kattalashtirilgan o'yin, subtitr) |
 | **Subtitr** (Shorts) | Nutq so'zma-so'z yoziladi (faster-whisper, o'zbek/rus/ingliz), aytilayotgan so'z sariq bo'lib ajralib turadi. Joylashuvi YouTube interfeysiga moslangan — pastga qarang |
 | **Prevyu** | 1280×720, eng kuchli kadr, to'yingan ranglar, katta qalin yozuv, "GTA 6" belgisi. Panelda yozuvni o'zgartirib qayta chizish mumkin |
 | **Tavsif** | AI matni + avtomatik taym-kodlar (YouTube bo'limlari) + original stream muallifi havolasi + sizning doimiy oxiringiz |
@@ -29,12 +29,11 @@ Joylashuv haqiqiy telefon skrinshotidan o'lchangan (YouTube ilovasi, 2026). 1080
 
 | YouTube interfeysi | Qayerda | Bizning elementlar |
 |---|---|---|
-| Orqaga, qidiruv, menyu | y < 125 | sarlavha y=190 dan boshlanadi |
 | Yurak, koment, saqlash, ulashish, remiks | x ≥ 935, y ≥ 1026 | subtitr x 160–920 oralig'ida, markazda |
 | Qidiruv maslahati, @kanal + Subscribe, nom | y ≥ 1634 | subtitr y≈1400 da tugaydi (234px zaxira) |
 
-Tartib (mashhur GTA edit Shorts'lar kabi): sarlavha → o'yin kadri (y 430–1430, kattalashtirilgan) → kanal nomi (kichik) →
-subtitr (kadrning pastki qismida). Uslub: **Toza** (kursiv, oq, yumshoq soya) yoki **Karaoke** (qalin, aytilayotgan so'z sariq).
+Tartib (mashhur GTA edit Shorts'lar kabi): xira fon ustida o'yin kadri (y 430–1430, kattalashtirilgan), uning pastki qismida subtitr.
+Videoning o'ziga boshqa yozuv qo'shilmaydi — nom YouTube'ning nom maydonida chiqadi. Uslub: **Toza** (kursiv, oq, yumshoq soya) yoki **Karaoke** (qalin, aytilayotgan so'z sariq).
 Panel → Kliplar → Shorts → **"📐 YouTube interfeysini ko'rsatish"** — tugmalar va tavsif qayerga tushishini video ustida ko'rasiz.
 
 ### Web App sahifalari

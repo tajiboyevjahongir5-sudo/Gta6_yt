@@ -10,16 +10,13 @@ const { log } = require('./db');
 //   bottom block (search hint, @channel + Subscribe, title): y >= ~1634
 //   top bar (back, search, menu): y <= ~125
 // Layout built on it (same as popular GTA edit Shorts):
-//   title       y 190..~400, full width
 //   gameplay    band y 430..1430
-//   watermark   channel name, small, just above the subtitles
 //   subtitles   one line, bottom edge at y ~1400 (inside the gameplay band), left of the button column
 // equal side margins keep the subtitle centred like the reference while still ending before the buttons (x 920 < 935)
 const SAFE = { W: 1080, H: 1920, top: 125, bottom: 286, left: 160, right: 160, buttonsX: 935, buttonsY: 1026 };
 SAFE.x0 = SAFE.left; SAFE.x1 = SAFE.W - SAFE.right; SAFE.cx = (SAFE.x0 + SAFE.x1) / 2; // 540
 SAFE.band = { y: 430, h: 1000 };
 SAFE.subBottom = 1400;   // subtitle baseline area: ~234px of clearance above the bottom block (room for a 2-line title)
-SAFE.titleY = 190;
 
 const PY = process.env.PYTHON_BIN || 'python3';
 const SCRIPT = path.join(__dirname, '..', 'scripts', 'transcribe.py');
@@ -67,7 +64,7 @@ function fontFamily() {
 
 // ASS file. style 'clean' = like the reference Short (italic, white, soft shadow, sentence case);
 // 'karaoke' = bold caps with the spoken word in the accent colour.
-function buildAss(words, dur, { accent = '#FFD400', style = 'clean', watermark = '' } = {}) {
+function buildAss(words, dur, { accent = '#FFD400', style = 'clean' } = {}) {
   const karaoke = style === 'karaoke';
   const size = karaoke ? 70 : 66;
   const marginV = SAFE.H - SAFE.subBottom; // alignment 2 = bottom-centre between MarginL and MarginR
@@ -84,13 +81,11 @@ ScaledBorderAndShadow: yes
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
 ${sub}
-Style: Mark,${fontFamily()},40,&H30FFFFFF,&H30FFFFFF,&H60000000,&H80000000,-1,-1,0,0,100,100,6,0,1,1.5,2,2,${SAFE.left},${SAFE.right},${marginV + Math.round(size * 1.45)},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 `;
   const hi = assColor(accent); const lines = [];
-  if (watermark) lines.push(`Dialogue: 0,${assTime(0)},${assTime(dur)},Mark,,0,0,0,,${assText(watermark, true)}`);
   for (const ph of phrases(words, karaoke ? { maxChars: 16 } : { maxWords: 4, maxChars: 20 })) {
     const end = Math.min(dur, ph[ph.length - 1].end + 0.25);
     if (!karaoke) {

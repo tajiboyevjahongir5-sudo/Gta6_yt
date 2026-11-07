@@ -52,7 +52,6 @@ const DEFAULTS = {
   whisperModel: 'small',       // tiny | base | small | medium (bigger = more accurate, slower)
   subtitleLang: 'auto',        // auto | uz | ru | en
   subtitleStyle: 'clean',      // clean (italic white, like popular GTA edits) | karaoke (bold caps, spoken word yellow)
-  watermark: true,             // channel name small above the subtitles (makes re-uploads of your Shorts obvious)
 };
 function getSettings() {
   const s = { ...DEFAULTS };
