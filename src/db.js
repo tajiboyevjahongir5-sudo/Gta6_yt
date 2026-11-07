@@ -57,7 +57,7 @@ const DEFAULTS = {
   aiProvider: 'auto',          // auto (Gemini first — free, then Claude) | gemini | claude
   aiWatchMaxMinutes: 180,      // Gemini watches the whole YouTube video itself if it is at most this long
   subtitles: true,             // word-by-word captions on Shorts (needs python3 + faster-whisper)
-  whisperModel: 'small',       // tiny | base | small | medium (bigger = more accurate, slower)
+  asrModel: 'large-v3-turbo',  // speech recognition: small | medium | large-v3-turbo (most accurate)
   subtitleLang: 'auto',        // language the streamer SPEAKS: auto | uz | ru | en
   subtitleStyle: 'pop',        // pop (words appear as spoken, bouncy) | clean (italic white phrase) | karaoke (bold caps, spoken word yellow)
   effects: true,               // sound effects (whoosh, boom, pop)

@@ -21,6 +21,8 @@ cascades = [cv2.CascadeClassifier(cv2.data.haarcascades + f) for f in
 faces = []  # (frame index, x, y, w, h)
 used = 0
 edge_sum = None  # how often each pixel is an edge: the overlay's frame lines are edges in every frame, game edges move
+v_sum = v_sq = None   # temporal variance: gameplay changes all the time, the webcam's room doesn't
+gx_sum = gy_sum = None  # mean |gradient|: where webcam meets gameplay the picture "jumps" at the same place in every frame
 ES = 0.5         # edge map scale
 for k in range(a.samples):
     cap.set(cv2.CAP_PROP_POS_FRAMES, int(n * (0.04 + 0.92 * k / max(1, a.samples - 1))))
@@ -40,6 +42,13 @@ for k in range(a.samples):
         faces.append((k, x / scale, y / scale, w / scale, h / scale))
     e = cv2.Canny(cv2.cvtColor(cv2.resize(frame, None, fx=ES, fy=ES), cv2.COLOR_BGR2GRAY), 60, 160).astype(np.float32) / 255
     edge_sum = e if edge_sum is None else edge_sum + e
+    g = cv2.cvtColor(cv2.resize(frame, None, fx=ES, fy=ES), cv2.COLOR_BGR2GRAY).astype(np.float32)
+    dx, dy = np.abs(np.diff(g, axis=1)), np.abs(np.diff(g, axis=0))
+    dx = np.pad(dx, ((0, 0), (0, 1))); dy = np.pad(dy, ((0, 1), (0, 0)))
+    gx_sum = dx if gx_sum is None else gx_sum + dx
+    v_sum = g if v_sum is None else v_sum + g
+    v_sq = g * g if v_sq is None else v_sq + g * g
+    gy_sum = dy if gy_sum is None else gy_sum + dy
 
 def out(obj):
     print(json.dumps(obj)); sys.exit(0)
@@ -69,22 +78,41 @@ if fh > 0.38 * H:
     out({"found": False, "reason": "face fills the frame", "hits": best_hits, "samples": used, "width": W, "height": H})
 
 # webcam overlay ≈ face with shoulders and some room: ~3.4 face widths wide, ~2.6 face heights tall, face a bit above centre
-bw, bh = fw * 3.4, fh * 2.6
+bw, bh = fw * 2.7, fh * 2.3
 x, y = fx + fw / 2 - bw / 2, fy + fh * 0.45 - bh * 0.42
 # refine with the overlay's own border: a line that is an edge in most frames, just outside the face
 if edge_sum is not None:
     stable = edge_sum / used                      # 0..1, fraction of frames where the pixel is an edge
     eh, ew = stable.shape
+    gx_avg, gy_avg = gx_sum / used, gy_sum / used
+    tstd = np.sqrt(np.maximum(v_sq / used - (v_sum / used) ** 2, 0))  # how much each pixel changes over time
+    def contrast(axis, pos, outward, a0, a1):
+        # a real border has busy gameplay on the outer side; a line inside the webcam has calm room on both sides
+        p = int(pos * ES); k0, k1 = 3, 18
+        if axis == 'x':
+            o = tstd[a0:a1, max(0, p + k0 * outward if outward > 0 else p - k1):max(0, p + k1 if outward > 0 else p - k0)]
+            i = tstd[a0:a1, max(0, p - k1 if outward > 0 else p + k0):max(0, p - k0 if outward > 0 else p + k1)]
+        else:
+            o = tstd[max(0, p + k0 if outward > 0 else p - k1):max(0, p + k1 if outward > 0 else p - k0), a0:a1]
+            i = tstd[max(0, p - k1 if outward > 0 else p + k0):max(0, p - k0 if outward > 0 else p + k1), a0:a1]
+        if not o.size or not i.size: return False
+        return float(o.mean()) > 1.5 * float(i.mean()) + 2
     def line(axis, lo, hi, a0, a1, near_hi):
-        # static line between lo..hi (source px), measured along a0..a1 on the other axis.
-        # A thick border shows two lines (outer + inner edge): take the one nearest the face (inside the frame).
+        # border between lo..hi (source px), measured along a0..a1 on the other axis. Candidates: drawn frame lines
+        # (edge in most frames) and soft borders (average brightness jump); keep those with busy gameplay outside,
+        # nearest to the face first.
         lo, hi = int(max(0, lo) * ES), int(min((W if axis == 'x' else H), hi) * ES)
         a0, a1 = int(max(0, a0) * ES), int(a1 * ES)
-        if hi - lo < 2 or a1 - a0 < 4: return None
+        if hi - lo < 3 or a1 - a0 < 4: return None
         prof = stable[a0:min(a1, eh), lo:hi].mean(axis=0) if axis == 'x' else stable[lo:hi, a0:min(a1, ew)].mean(axis=1)
-        idx = np.nonzero(prof > 0.45)[0]
-        if not len(idx): return None
-        return (lo + (idx.max() if near_hi else idx.min())) / ES
+        grad = gx_avg[a0:min(a1, eh), lo:hi].mean(axis=0) if axis == 'x' else gy_avg[lo:hi, a0:min(a1, ew)].mean(axis=1)
+        base = float(np.median(grad)) + 1e-3
+        cand = sorted(set(np.nonzero(prof > 0.45)[0].tolist()) | set(np.nonzero((grad > 3.0 * base) & (grad > 12))[0].tolist()),
+                      reverse=near_hi)
+        outward = -1 if near_hi else 1          # L/T: gameplay is on the lower side, R/B: on the higher side
+        for c in cand:
+            if contrast(axis, (lo + c) / ES, outward, a0, min(a1, eh if axis == 'x' else ew)): return (lo + c) / ES
+        return None
     fy0, fy1, fx0, fx1 = fy - fh * 0.3, fy + fh * 1.3, fx - fw * 0.3, fx + fw * 1.3
     L = line('x', fx - fw * 3.0, fx - fw * 0.25, fy0, fy1, True)
     R = line('x', fx + fw * 1.25, fx + fw * 4.0, fy0, fy1, False)

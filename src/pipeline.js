@@ -291,7 +291,7 @@ async function processJob(job) {
     for (let i = 0; i < Math.min(settings.shortsPerVideo, picked.length); i++) {
       const s = picked[i]; const title = s.shortTitle || tpl.shortTitle(i);
       const out = path.join(outDir, `short_${i + 1}.mp4`); const thumb = path.join(outDir, `short_${i + 1}.jpg`);
-      const words = settings.subtitles ? await subs.transcribe(src, s.start, Math.min(58, s.end - s.start), dir, { model: settings.whisperModel, lang: settings.subtitleLang, to: settings.language === 'en' ? 'en' : '' }) : [];
+      const words = settings.subtitles ? await subs.transcribe(src, s.start, Math.min(58, s.end - s.start), dir, { model: settings.asrModel, lang: settings.subtitleLang, to: settings.language, context: { title: meta.title || job.title, subject: video.subject } }) : [];
       await render.renderShort(src, s, out, dir, { words, accent: settings.accent, style: settings.subtitleStyle, emoji: s.emoji, effects: settings.effects, emojis: settings.emojis, facecam,
         zoom: settings.zoom, endCard: settings.outro ? { channel: channelName, language: settings.language } : null });
       await render.grabFrame(out, 1.5, thumb, 540);

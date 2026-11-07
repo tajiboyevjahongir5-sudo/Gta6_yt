@@ -10,6 +10,7 @@ ap.add_argument("media")
 ap.add_argument("--model", default="small")
 ap.add_argument("--lang", default="auto")
 ap.add_argument("--to", default="")
+ap.add_argument("--context", default="", help="title/topic words that help recognition (names, game terms)")
 a = ap.parse_args()
 
 import wave
@@ -26,7 +27,9 @@ def load_audio(path):
     return pcm.astype(np.float32) / 32768.0
 
 model = WhisperModel(a.model, device="cpu", compute_type="int8")
-opts = dict(word_timestamps=True, vad_filter=True, beam_size=5)  # vad: skip game noise / music with no speech
+opts = dict(word_timestamps=True, vad_filter=True, beam_size=5,  # vad: skip game noise / music with no speech
+            vad_parameters=dict(min_silence_duration_ms=300), condition_on_previous_text=False,
+            initial_prompt=(a.context[:200] or None))
 audio = load_audio(a.media)
 segments, info = model.transcribe(audio, language=None if a.lang == "auto" else a.lang, **opts)
 task = "transcribe"

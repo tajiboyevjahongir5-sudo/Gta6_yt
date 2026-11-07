@@ -364,7 +364,7 @@ async function settings() {
       ${sw('subtitles', 'Shorts subtitrlari', 'So\'zma-so\'z, pastda, layk/koment tugmalari va tavsifdan chetda')}
       <div class="row"><div class="grow"><label class="f">Subtitr uslubi</label><select data-k="subtitleStyle">${[['pop', "Pop (so'zlar ovozga mos chiqadi)"], ['clean', 'Toza (kursiv, oq)'], ['karaoke', "Karaoke (sariq so'z)"]].map(([v, t]) => `<option value="${v}" ${s.subtitleStyle === v ? 'selected' : ''}>${t}</option>`).join('')}</select></div></div>
       <div class="row"><div class="grow"><label class="f">Streamer qaysi tilda gapiradi</label><select data-k="subtitleLang">${[['auto', 'Avtomatik'], ['uz', "O'zbekcha"], ['ru', 'Ruscha'], ['en', 'Inglizcha']].map(([v, t]) => `<option value="${v}" ${s.subtitleLang === v ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
-      <div class="grow"><label class="f">Aniqlik</label><select data-k="whisperModel">${[['base', 'Tez'], ['small', "O'rtacha"], ['medium', 'Aniq (sekin)']].map(([v, t]) => `<option value="${v}" ${s.whisperModel === v ? 'selected' : ''}>${t}</option>`).join('')}</select></div></div>
+      <div class="grow"><label class="f">Nutqni tanish</label><select data-k="asrModel">${[['small', 'Tez'], ['medium', "O'rtacha"], ['large-v3-turbo', 'Eng aniq']].map(([v, t]) => `<option value="${v}" ${s.asrModel === v ? 'selected' : ''}>${t}</option>`).join('')}</select></div></div>
       ${sw('lowQualityFallback', 'Past sifatga ruxsat (360p)', 'YouTube HD videoni bermasa, xato o\'rniga 360p da yuklab oladi')}
       ${sw('keepSource', 'Asl videoni saqlash', 'O\'chiq bo\'lsa diskni tejash uchun o\'chiriladi')}
     </div>

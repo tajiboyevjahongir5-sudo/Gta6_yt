@@ -8,6 +8,19 @@ const fx = require('./fx');
 const { log } = require('./db');
 
 const FPS = 30;
+// silent sources (screen recordings without sound, some uploads): feed a silent track so the audio graph still works
+const audioCache = new Map();
+async function hasAudio(src) {
+  if (!audioCache.has(src)) {
+    try { const { out } = await run(require('./config').FFPROBE, ['-v', 'error', '-select_streams', 'a', '-show_entries', 'stream=index', '-of', 'csv=p=0', src]);
+      audioCache.set(src, !!out.trim()); } catch (e) { audioCache.set(src, true); }
+  }
+  return audioCache.get(src);
+}
+async function audioSource(src, dur) {
+  return (await hasAudio(src)) ? { inputs: [], label: '0:a', next: 1 }
+    : { inputs: ['-f', 'lavfi', '-t', dur.toFixed(2), '-i', 'anullsrc=r=48000:cl=stereo'], label: '1:a', next: 2 };
+}
 // ffmpeg filter-graph escaping for values like a font path
 const esc = (s) => String(s).replace(/\\/g, '/').replace(/:/g, '\\:').replace(/'/g, "\\'");
 const fontOpt = () => (FONT ? `fontfile='${esc(FONT)}':` : '');
@@ -54,11 +67,12 @@ async function cutSegmentRaw(src, seg, out, { width = 1920, height = 1080, label
     const tf = textFile(workDir, path.basename(out) + '.txt', label);
     vf += `,drawtext=${fontOpt()}textfile='${esc(tf)}':fontsize=${Math.round(height / 22)}:fontcolor=white:borderw=4:bordercolor=black@0.85:x=40:y=40:enable='lt(t,3.5)'`;
   }
+  const au = await audioSource(src, dur);
   const g = effects ? await fx.buildGraph(fx.planEvents({ dur, peakT: seg.peak - seg.start, peakEmoji: seg.emoji || '🔥', maxExtra: 0, emojis,
-    area: { x: width - 620, y: 90, w: 560, h: 420, size: 260 } }), { vIn: 'v0', aIn: 'a0', firstIdx: 1, emojiSize: 260 }) : null;
-  const fc = `[0:v]${vf}[v0];[0:a]aresample=48000,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,afade=t=in:st=0:d=${fd},afade=t=out:st=${(dur - fd).toFixed(2)}:d=${fd}[a0]` +
+    area: { x: width - 620, y: 90, w: 560, h: 420, size: 260 } }), { vIn: 'v0', aIn: 'a0', firstIdx: au.next, emojiSize: 260 }) : null;
+  const fc = `[0:v]${vf}[v0];[${au.label}]aresample=48000,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,afade=t=in:st=0:d=${fd},afade=t=out:st=${(dur - fd).toFixed(2)}:d=${fd}[a0]` +
     (g && g.filter ? ';' + g.filter : '');
-  await run(FFMPEG, ['-y', '-hide_banner', '-loglevel', 'error', '-ss', String(seg.start), '-t', dur.toFixed(2), '-i', src, ...(g ? g.inputs : []),
+  await run(FFMPEG, ['-y', '-hide_banner', '-loglevel', 'error', '-ss', String(seg.start), '-t', dur.toFixed(2), '-i', src, ...au.inputs, ...(g ? g.inputs : []),
     '-filter_complex', fc, '-map', `[${g ? g.vOut : 'v0'}]`, '-map', `[${g ? g.aOut : 'a0'}]`, '-t', dur.toFixed(2),
     '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '160k', '-ac', '2', '-ar', '48000', out]);
 }
@@ -175,12 +189,13 @@ async function renderShortRaw(src, seg, out, workDir, { words = [], accent = '#F
     fc = `[0:v]split[a][b];[a]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,boxblur=25:2,eq=brightness=-0.15[bg];` +
       `[b]scale=-2:${band},crop=1080:${band}${zf(1080, band)}[fg];[bg][fg]overlay=(W-w)/2:${bandY}:shortest=1,fps=${FPS},fade=t=in:st=0:d=0.25[v0];`;
   }
-  fc += `[0:a]aresample=48000,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[a0]`;
+  const au = await audioSource(src, dur);
+  fc += `[${au.label}]aresample=48000,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[a0]`;
   let v = 'v0', a = 'a0', inputs = [];
   if (effects) {
     const events = fx.planEvents({ dur, peakT: (seg.peak ?? seg.start + dur / 2) - seg.start, peakEmoji: emoji || '😱', words, emojis, endDing: !!endCard,
       area: emojiArea });
-    const g = await fx.buildGraph(events, { vIn: v, aIn: a, firstIdx: 1, emojiSize: 300 });
+    const g = await fx.buildGraph(events, { vIn: v, aIn: a, firstIdx: au.next, emojiSize: 300 });
     if (g.filter) fc += ';' + g.filter;
     v = g.vOut; a = g.aOut; inputs = g.inputs;
   }
@@ -200,7 +215,7 @@ async function renderShortRaw(src, seg, out, workDir, { words = [], accent = '#F
     v = 've';
   }
   fc += `;[${a}]loudnorm=I=-14:TP=-1.5:LRA=11,aresample=48000,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[aout]`;
-  await run(FFMPEG, ['-y', '-hide_banner', '-loglevel', 'error', '-ss', String(seg.start), '-t', dur.toFixed(2), '-i', src, ...inputs,
+  await run(FFMPEG, ['-y', '-hide_banner', '-loglevel', 'error', '-ss', String(seg.start), '-t', dur.toFixed(2), '-i', src, ...au.inputs, ...inputs,
     '-filter_complex', fc, '-map', `[${v}]`, '-map', '[aout]', '-t', dur.toFixed(2),
     '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '160k', '-ac', '2', '-ar', '48000', '-movflags', '+faststart', out]);
 }

@@ -18,7 +18,7 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm install --omit=dev --no-audit --no-fund
 # Shorts subtitles: faster-whisper, model downloaded once at build time (WHISPER_MODEL must match the setting)
-ARG WHISPER_MODEL=small
+ARG WHISPER_MODEL=large-v3-turbo
 # + OpenCV (4.x: has the Haar face detector) to find a streamer webcam in the video
 RUN pip3 install --no-cache-dir --break-system-packages faster-whisper "opencv-python-headless<5" \
  && python3 -c "from faster_whisper import WhisperModel; WhisperModel('${WHISPER_MODEL}', device='cpu', compute_type='int8')"

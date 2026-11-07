@@ -23,20 +23,64 @@ const SCRIPT = path.join(__dirname, '..', 'scripts', 'transcribe.py');
 let unavailable = false;
 
 // words spoken inside [start, start+dur] of the source, with times relative to the clip
-async function transcribe(src, start, dur, workDir, { model = 'small', lang = 'auto', to = 'en' } = {}) {
+// Speech -> words with timings. Recognition in the speaker's own language with a big Whisper model; if the video
+// language is different (e.g. Russian speech, English channel) the AI translates phrase by phrase, fixing words
+// Whisper misheard from the video's context. Timings stay Whisper's, so the subtitles still follow the voice.
+async function transcribe(src, start, dur, workDir, { model = 'large-v3-turbo', lang = 'auto', to = 'en', context = {} } = {}) {
   if (unavailable) return [];
   const wav = path.join(workDir, `sub_${Math.round(start)}.wav`);
+  const hint = [context.title, context.subject].filter(Boolean).join('. ');
   try {
-    await run(FFMPEG, ['-y', '-hide_banner', '-loglevel', 'error', '-ss', String(start), '-t', String(dur), '-i', src, '-vn', '-ac', '1', '-ar', '16000', wav]);
-    const { out } = await run(PY, [SCRIPT, wav, '--model', model, '--lang', lang, '--to', to], { timeoutMs: 15 * 60000 });
-    const j = JSON.parse(out);
-    return (j.words || []).filter((w) => w.end > 0 && w.start < dur);
+    // speech band + noise reduction + level: game music/explosions confuse recognition
+    await run(FFMPEG, ['-y', '-hide_banner', '-loglevel', 'error', '-ss', String(start), '-t', String(dur), '-i', src, '-vn',
+      '-af', 'highpass=f=90,lowpass=f=7500,afftdn=nf=-25,dynaudnorm=f=150:g=15', '-ac', '1', '-ar', '16000', wav]);
+    const asr = async (extra = []) => JSON.parse((await run(PY, [SCRIPT, wav, '--model', model, '--lang', lang, '--context', hint, ...extra],
+      { timeoutMs: 20 * 60000 })).out);
+    let j = await asr();
+    let words = (j.words || []).filter((w) => w.end > 0 && w.start < dur);
+    if (!words.length || !to || j.language === to) return words;
+    const translated = await translateWords(words, j.language, to, context);
+    if (translated) return translated;
+    // no AI: Whisper's own speech -> English translation (less accurate)
+    if (to === 'en') { j = await asr(['--to', 'en']); return (j.words || []).filter((w) => w.end > 0 && w.start < dur); }
+    return words;
   } catch (e) {
     if (/ENOENT|ModuleNotFoundError|No module named/.test(e.message)) {
       unavailable = true; log('Subtitr o\'chiq: python3 + faster-whisper o\'rnatilmagan (pip install faster-whisper)', 'warn');
     } else log('Subtitr yaratilmadi: ' + e.message, 'warn');
     return [];
   } finally { fs.rmSync(wav, { force: true }); }
+}
+
+const LANG_NAMES = { en: 'English', ru: 'Russian', uz: 'Uzbek', tr: 'Turkish', kk: 'Kazakh', ky: 'Kyrgyz', tg: 'Tajik', de: 'German', es: 'Spanish' };
+async function translateWords(words, from, to, context) {
+  const ai = require('./ai');
+  if (!ai.enabled()) return null;
+  const groups = phrases(words, { maxWords: 6, maxChars: 34, gap: 0.7 });
+  const lines = groups.map((g) => g.map((w) => w.word).join(' '));
+  const r = await ai.generateJSON({
+    schema: { type: 'object', additionalProperties: false, required: ['lines'],
+      properties: { lines: { type: 'array', items: { type: 'string' } } } },
+    maxTokens: 4000,
+    parts: [{ text:
+      `Subtitle lines from a ${LANG_NAMES[from] || from} speaker in the video "${context.title || ''}"${context.subject ? ` (${context.subject})` : ''}.\n` +
+      `They come from automatic speech recognition, so some words may be misheard: fix them using the context.\n` +
+      `Translate every line into short, natural spoken ${LANG_NAMES[to] || to} (keep the tone, slang and emotion; no quotes, no extra notes).\n` +
+      `Return exactly ${lines.length} lines in "lines", in the same order, one per input line.\n\n` +
+      lines.map((l, i) => `${i + 1}. ${l}`).join('\n') }],
+  });
+  const out = r?.data?.lines;
+  if (!Array.isArray(out) || out.length !== lines.length) { log('Subtitr tarjimasi mos kelmadi, Whisper tarjimasi ishlatiladi', 'warn'); return null; }
+  // spread each translated line's words over the time its original phrase was spoken (longer words get more time)
+  const res = [];
+  groups.forEach((g, i) => {
+    const toks = String(out[i]).replace(/\s+/g, ' ').trim().split(' ').filter(Boolean);
+    if (!toks.length) return;
+    const t0 = g[0].start, t1 = g[g.length - 1].end, total = toks.reduce((a, w) => a + w.length + 1, 0);
+    let t = t0;
+    for (const w of toks) { const d = ((t1 - t0) * (w.length + 1)) / total; res.push({ word: w, start: +t.toFixed(2), end: +(t + d).toFixed(2) }); t += d; }
+  });
+  return res;
 }
 
 // group words into short phrases: <= 3 words, <= 18 chars, split on pauses
@@ -128,4 +172,4 @@ async function detectFacecam(src) {
   catch (e) { log('Webkamera aniqlanmadi: ' + e.message.slice(0, 200), 'warn'); return null; }
 }
 
-module.exports = { detectFacecam, SAFE, transcribe, buildAss, phrases, fontFamily };
+module.exports = { translateWords, detectFacecam, SAFE, transcribe, buildAss, phrases, fontFamily };
