@@ -122,7 +122,7 @@ async function processJob(job) {
       const s = picked[i]; const title = s.shortTitle || tpl.shortTitle(i);
       const out = path.join(outDir, `short_${i + 1}.mp4`); const thumb = path.join(outDir, `short_${i + 1}.jpg`);
       const words = settings.subtitles ? await subs.transcribe(src, s.start, Math.min(58, s.end - s.start), dir, { model: settings.whisperModel, lang: settings.subtitleLang }) : [];
-      await render.renderShort(src, s, title, out, dir, { words, accent: settings.accent });
+      await render.renderShort(src, s, title, out, dir, { words, accent: settings.accent, style: settings.subtitleStyle, watermark: settings.watermark ? settings.channelName : '' });
       await render.grabFrame(out, 1.5, thumb, 540);
       const description = [title, '', creditLine(job), '', `#shorts #${settings.game.replace(/\s+/g, '')} #gaming`].join('\n');
       const r = ins.run(job.id, 'short', out, thumb, JSON.stringify([s]), Math.min(58, s.end - s.start), s.final,

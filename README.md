@@ -24,19 +24,18 @@ Havola / kuzatilgan kanal ─► yuklab olish (yt-dlp) ─► tahlil: ovoz + har
 | **Manbalar** | YouTube / Twitch / Kick kanallarini kuzatadi: efir tugab yozuvi chiqqach (sarlavhada "GTA" bo'lsa, 30+ daqiqa) o'zi navbatga qo'yadi |
 | **Statistika** | Obunachilar, kunlik ko'rishlar, Video vs Shorts, eng ko'p ko'rilganlar |
 
-### Shorts maketi va xavfsiz zona
-YouTube Shorts ekranining bir qismini o'z tugmalari bilan yopadi. Manbalar har xil raqam beradi, shuning uchun eng ehtiyotkor
-qiymatlar olingan (1080×1920 kadrda, `src/subtitles.js` → `SAFE`):
+### Shorts maketi
+Joylashuv haqiqiy telefon skrinshotidan o'lchangan (YouTube ilovasi, 2026). 1080×1920 kadrda (`src/subtitles.js` → `SAFE`):
 
-| Zona | Nima turadi | Chegara |
+| YouTube interfeysi | Qayerda | Bizning elementlar |
 |---|---|---|
-| Pastki 672px | kanal nomi, Obuna, nom/tavsif, musiqa | subtitr shundan **yuqorida** tugaydi |
-| O'ng 192px | layk, dizlayk, koment, ulashish, remiks | subtitr va sarlavha shundan **chapda**, bo'sh joy markazida (x≈468) |
-| Yuqori 288px | qidiruv, menyu | sarlavha shundan **pastda** boshlanadi |
+| Orqaga, qidiruv, menyu | y < 125 | sarlavha y=190 dan boshlanadi |
+| Yurak, koment, saqlash, ulashish, remiks | x ≥ 935, y ≥ 1026 | subtitr x 160–920 oralig'ida, markazda |
+| Qidiruv maslahati, @kanal + Subscribe, nom | y ≥ 1634 | subtitr y≈1400 da tugaydi (234px zaxira) |
 
-Tartib: sarlavha (tepada) → o'yin kadri (o'rtada, kattalashtirilgan) → subtitr (pastda, tavsif ustida).
-Panel → Kliplar → Shorts → **"📐 YouTube interfeysini ko'rsatish"** — tasdiqlashdan oldin tugmalar va tavsif qayerga tushishini
-video ustida ko'rasiz.
+Tartib (mashhur GTA edit Shorts'lar kabi): sarlavha → o'yin kadri (y 430–1430, kattalashtirilgan) → kanal nomi (kichik) →
+subtitr (kadrning pastki qismida). Uslub: **Toza** (kursiv, oq, yumshoq soya) yoki **Karaoke** (qalin, aytilayotgan so'z sariq).
+Panel → Kliplar → Shorts → **"📐 YouTube interfeysini ko'rsatish"** — tugmalar va tavsif qayerga tushishini video ustida ko'rasiz.
 
 ### Web App sahifalari
 - **Asosiy** — kanal ko'rsatkichlari, havola qo'shish, hozir ishlanayotganlar, keyingi yuklashlar, hodisalar

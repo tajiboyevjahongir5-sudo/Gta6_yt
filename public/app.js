@@ -125,7 +125,7 @@ async function openClip(id) {
     <div class="row" style="margin-bottom:10px"><b class="grow">${c.kind === 'short' ? '📱 Shorts' : '🎬 Kompilyatsiya'} • ${dur(c.duration)}</b>${pill(c.status)}<button class="icon" id="x">✕</button></div>
     ${c.hasFile && c.kind === 'short' ? `<div class="phone"><video src="${media(id, 'video')}" controls playsinline preload="metadata"></video>
       <div class="ui hidden" id="ui"><i class="z top"></i><i class="z right"></i><i class="z bottom"></i>
-      <span class="btns">👍<br>👎<br>💬<br>↗️<br>🔁</span><span class="desc"><b>@${esc(c.job?.author ? 'kanalingiz' : 'kanal')}</b> <u>Obuna</u><br>${esc(c.title)}</span></div></div>
+      <span class="btns">🤍<br>💬<br>🔖<br>↗️<br>🔁</span><span class="desc"><b>@${esc(c.job?.author ? 'kanalingiz' : 'kanal')}</b> <u>Obuna</u><br>${esc(c.title)}</span></div></div>
       <label class="switch" style="border:0"><span class="small">📐 YouTube interfeysini ko'rsatish (qizil = to'sib qoladigan joylar)</span><input type="checkbox" id="uiT"></label>`
     : c.hasFile ? `<video src="${media(id, 'video')}" controls playsinline preload="metadata" poster="${media(id, 'thumb')}"></video>` : `<img src="${media(id, 'thumb')}" style="width:100%;border-radius:12px">`}
     ${c.url ? `<p><a href="${c.url}" target="_blank" style="color:var(--blue)">YouTube'da ochish ↗</a> · 👁 ${num(c.views)} · 👍 ${num(c.likes)} · 💬 ${num(c.comments)}</p>` : ''}
@@ -286,6 +286,8 @@ async function settings() {
       <div class="row"><div class="grow">${inp('shortsPerVideo', 'Har streamdan Shorts', 'number')}</div><div class="grow"><label class="f">Sifat</label><select data-k="quality">${[720, 1080].map((q) => `<option value="${q}" ${+s.quality === q ? 'selected' : ''}>${q}p</option>`).join('')}</select></div></div>
       <div class="row"><div class="grow">${inp('clipBefore', 'Lahzadan oldin (s)', 'number')}</div><div class="grow">${inp('clipAfter', 'Lahzadan keyin (s)', 'number')}</div></div>
       ${sw('subtitles', 'Shorts subtitrlari', 'So\'zma-so\'z, pastda, layk/koment tugmalari va tavsifdan chetda')}
+      <div class="row"><div class="grow"><label class="f">Subtitr uslubi</label><select data-k="subtitleStyle">${[['clean', 'Toza (kursiv, oq)'], ['karaoke', "Karaoke (sariq so'z)"]].map(([v, t]) => `<option value="${v}" ${s.subtitleStyle === v ? 'selected' : ''}>${t}</option>`).join('')}</select></div></div>
+      ${sw('watermark', 'Kanal nomi subtitr ustida', 'Kichik yozuv — Shorts\'ingizni boshqalar ko\'chirsa ham sizniki ekani ko\'rinadi')}
       <div class="row"><div class="grow"><label class="f">Subtitr tili</label><select data-k="subtitleLang">${[['auto', 'Avtomatik'], ['uz', "O'zbekcha"], ['ru', 'Ruscha'], ['en', 'Inglizcha']].map(([v, t]) => `<option value="${v}" ${s.subtitleLang === v ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
       <div class="grow"><label class="f">Aniqlik</label><select data-k="whisperModel">${[['base', 'Tez'], ['small', "O'rtacha"], ['medium', 'Aniq (sekin)']].map(([v, t]) => `<option value="${v}" ${s.whisperModel === v ? 'selected' : ''}>${t}</option>`).join('')}</select></div></div>
       ${sw('keepSource', 'Asl videoni saqlash', 'O\'chiq bo\'lsa diskni tejash uchun o\'chiriladi')}

@@ -5,14 +5,21 @@ const { run } = require('./util');
 const { FFMPEG, FONT } = require('./config');
 const { log } = require('./db');
 
-// YouTube Shorts UI covers parts of the 1080x1920 frame. Sources disagree, so these are the conservative values:
-//   bottom 672px: channel name, Subscribe, title/description, sound
-//   right 192px:  like / dislike / comment / share / remix column
-//   top 288px:    search, menu
-// Everything important (title, subtitles) must stay inside this box.
-const SAFE = { W: 1080, H: 1920, top: 288, bottom: 672, left: 48, right: 192 };
-SAFE.x0 = SAFE.left; SAFE.x1 = SAFE.W - SAFE.right; SAFE.y0 = SAFE.top; SAFE.y1 = SAFE.H - SAFE.bottom;
-SAFE.cx = (SAFE.x0 + SAFE.x1) / 2; // 468: the visual center of the free area, not the frame center
+// Where the YouTube Shorts UI sits on a 1080x1920 frame, measured from a real phone screenshot (iPhone, 2026):
+//   right column (like / comment / save / share / remix): x >= ~935, from y ~1026 down
+//   bottom block (search hint, @channel + Subscribe, title): y >= ~1634
+//   top bar (back, search, menu): y <= ~125
+// Layout built on it (same as popular GTA edit Shorts):
+//   title       y 190..~400, full width
+//   gameplay    band y 430..1430
+//   watermark   channel name, small, just above the subtitles
+//   subtitles   one line, bottom edge at y ~1400 (inside the gameplay band), left of the button column
+// equal side margins keep the subtitle centred like the reference while still ending before the buttons (x 920 < 935)
+const SAFE = { W: 1080, H: 1920, top: 125, bottom: 286, left: 160, right: 160, buttonsX: 935, buttonsY: 1026 };
+SAFE.x0 = SAFE.left; SAFE.x1 = SAFE.W - SAFE.right; SAFE.cx = (SAFE.x0 + SAFE.x1) / 2; // 540
+SAFE.band = { y: 430, h: 1000 };
+SAFE.subBottom = 1400;   // subtitle baseline area: ~234px of clearance above the bottom block (room for a 2-line title)
+SAFE.titleY = 190;
 
 const PY = process.env.PYTHON_BIN || 'python3';
 const SCRIPT = path.join(__dirname, '..', 'scripts', 'transcribe.py');
@@ -49,7 +56,7 @@ function phrases(words, { maxWords = 3, maxChars = 18, gap = 0.6 } = {}) {
 }
 
 const assTime = (t) => { t = Math.max(0, t); const h = Math.floor(t / 3600), m = Math.floor(t / 60) % 60, s = (t % 60).toFixed(2).padStart(5, '0'); return `${h}:${String(m).padStart(2, '0')}:${s}`; };
-const assText = (s) => String(s).replace(/[{}\\]/g, '').replace(/\n/g, ' ').toLocaleUpperCase('uz');
+const assText = (s, upper) => { const t = String(s).replace(/[{}\\]/g, '').replace(/\n/g, ' '); return upper ? t.toLocaleUpperCase('uz') : t; };
 const assColor = (hex) => { const h = hex.replace('#', '').padEnd(6, '0'); return `&H00${h.slice(4, 6)}${h.slice(2, 4)}${h.slice(0, 2)}`.toUpperCase(); };
 
 function fontFamily() {
@@ -58,9 +65,15 @@ function fontFamily() {
   catch (e) { return /DejaVu/i.test(FONT) ? 'DejaVu Sans' : path.basename(FONT).replace(/[-_ ]?(Bold|Black|Heavy).*$/i, '').replace(/\.[ot]tf$/i, ''); }
 }
 
-// ASS file: bottom-centered inside the safe box, current word highlighted
-function buildAss(words, dur, { accent = '#FFD400', fontSize = 76 } = {}) {
-  const marginV = SAFE.bottom + 28; // text baseline sits just above the description area
+// ASS file. style 'clean' = like the reference Short (italic, white, soft shadow, sentence case);
+// 'karaoke' = bold caps with the spoken word in the accent colour.
+function buildAss(words, dur, { accent = '#FFD400', style = 'clean', watermark = '' } = {}) {
+  const karaoke = style === 'karaoke';
+  const size = karaoke ? 70 : 66;
+  const marginV = SAFE.H - SAFE.subBottom; // alignment 2 = bottom-centre between MarginL and MarginR
+  const sub = karaoke
+    ? `Style: Sub,${fontFamily()},${size},&H00FFFFFF,&H00FFFFFF,&H00000000,&H96000000,-1,0,0,0,100,100,0,0,1,6,3,2,${SAFE.left},${SAFE.right},${marginV},1`
+    : `Style: Sub,${fontFamily()},${size},&H00FFFFFF,&H00FFFFFF,&H50000000,&H90000000,-1,-1,0,0,100,100,0,0,1,2.5,4,2,${SAFE.left},${SAFE.right},${marginV},1`;
   const head = `[Script Info]
 ScriptType: v4.00+
 PlayResX: ${SAFE.W}
@@ -70,19 +83,26 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Sub,${fontFamily()},${fontSize},&H00FFFFFF,&H00FFFFFF,&H00000000,&H96000000,-1,0,0,0,100,100,0,0,1,7,3,2,${SAFE.left},${SAFE.right},${marginV},1
+${sub}
+Style: Mark,${fontFamily()},40,&H30FFFFFF,&H30FFFFFF,&H60000000,&H80000000,-1,-1,0,0,100,100,6,0,1,1.5,2,2,${SAFE.left},${SAFE.right},${marginV + Math.round(size * 1.45)},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 `;
   const hi = assColor(accent); const lines = [];
-  for (const ph of phrases(words)) {
+  if (watermark) lines.push(`Dialogue: 0,${assTime(0)},${assTime(dur)},Mark,,0,0,0,,${assText(watermark, true)}`);
+  for (const ph of phrases(words, karaoke ? { maxChars: 16 } : { maxWords: 4, maxChars: 20 })) {
     const end = Math.min(dur, ph[ph.length - 1].end + 0.25);
-    // one event per word: the whole phrase stays, the spoken word turns yellow and pops slightly
+    if (!karaoke) {
+      let t = ph.map((x) => assText(x.word)).join(' '); t = t.charAt(0).toLocaleUpperCase('uz') + t.slice(1);
+      lines.push(`Dialogue: 0,${assTime(ph[0].start)},${assTime(end)},Sub,,0,0,0,,{\\fad(80,80)}${t}`);
+      continue;
+    }
+    // one event per word: the whole phrase stays, the spoken word turns accent-coloured and pops slightly
     ph.forEach((w, i) => {
       const s = i === 0 ? ph[0].start : w.start; const e = i < ph.length - 1 ? ph[i + 1].start : end;
       if (e <= s) return;
-      const text = ph.map((x, k) => (k === i ? `{\\c${hi}\\fscx108\\fscy108}${assText(x.word)}{\\r}` : assText(x.word))).join(' ');
+      const text = ph.map((x, k) => (k === i ? `{\\c${hi}\\fscx108\\fscy108}${assText(x.word, true)}{\\r}` : assText(x.word, true))).join(' ');
       lines.push(`Dialogue: 0,${assTime(s)},${assTime(e)},Sub,,0,0,0,,${text}`);
     });
   }

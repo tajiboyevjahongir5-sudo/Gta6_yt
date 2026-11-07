@@ -55,20 +55,20 @@ async function renderCompilation(src, segments, out, workDir, onProgress = () =>
 }
 
 // vertical Short, laid out around the YouTube Shorts UI (see SAFE in subtitles.js):
-//   title      -> top of the safe box, centered in the free area (left of the like/comment column)
+//   title      -> under the top bar
 //   gameplay   -> full-width band in the middle, zoomed in (sides cropped)
-//   subtitles  -> bottom of the safe box, just above the channel name / description
-async function renderShort(src, seg, title, out, workDir, { words = [], accent = '#FFD400' } = {}) {
+//   subtitles  -> bottom of the gameplay band, left of the like/comment column, above the channel/description block
+async function renderShort(src, seg, title, out, workDir, { words = [], accent = '#FFD400', style = 'clean', watermark = '' } = {}) {
   const dur = Math.min(58, seg.end - seg.start);
-  const tf = textFile(workDir, path.basename(out) + '.txt', wrap(title, 17, 3));
-  const band = 760, bandY = 540; // 540..1300: under the title, behind the subtitles
+  const tf = textFile(workDir, path.basename(out) + '.txt', wrap(title, 22, 3));
+  const band = SAFE.band.h, bandY = SAFE.band.y;
   let fc = `[0:v]split[a][b];[a]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,boxblur=25:2,eq=brightness=-0.15[bg];` +
     `[b]scale=-2:${band},crop='min(iw,1080)':${band}[fg];[bg][fg]overlay=(W-w)/2:${bandY},fps=${FPS},` +
-    `drawtext=${fontOpt()}textfile='${esc(tf)}':fontsize=68:line_spacing=8:fontcolor=white:borderw=6:bordercolor=black:` +
-    `x=${SAFE.x0}+(${SAFE.x1 - SAFE.x0}-text_w)/2:y=${SAFE.y0 + 12},fade=t=in:st=0:d=0.25`;
-  if (words.length) {
+    `drawtext=${fontOpt()}textfile='${esc(tf)}':fontsize=64:line_spacing=8:fontcolor=white:borderw=6:bordercolor=black:` +
+    `x=(w-text_w)/2:y=${SAFE.titleY},fade=t=in:st=0:d=0.25`;
+  if (words.length || watermark) {
     const ass = path.join(workDir, path.basename(out) + '.ass');
-    fs.writeFileSync(ass, buildAss(words, dur, { accent }));
+    fs.writeFileSync(ass, buildAss(words, dur, { accent, style, watermark }));
     fc += `,subtitles=filename='${esc(ass)}'${FONT ? `:fontsdir='${esc(path.dirname(FONT))}'` : ''}`;
   }
   fc += '[v]';
