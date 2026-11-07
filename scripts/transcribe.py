@@ -45,4 +45,12 @@ for seg in segments:
         t = w.word.strip()
         if t and w.probability > 0.02:
             words.append({"start": round(w.start, 2), "end": round(w.end, 2), "word": t})
-json.dump({"language": info.language, "task": task, "words": words}, sys.stdout, ensure_ascii=False)
+# exact speech ranges (Silero VAD, bundled with faster-whisper): where someone is talking, to the millisecond
+speech = []
+try:
+    from faster_whisper.vad import get_speech_timestamps, VadOptions
+    for r in get_speech_timestamps(audio, VadOptions(min_silence_duration_ms=280, speech_pad_ms=80, min_speech_duration_ms=180)):
+        speech.append([round(r["start"] / 16000, 2), round(r["end"] / 16000, 2)])
+except Exception:
+    pass
+json.dump({"language": info.language, "task": task, "words": words, "speech": speech}, sys.stdout, ensure_ascii=False)

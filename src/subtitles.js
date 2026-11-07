@@ -45,7 +45,7 @@ async function transcribe(src, start, dur, workDir, { model = 'large-v3-turbo', 
     let words = (j.words || []).filter((w) => w.end > 0 && w.start < dur);
     // Gemini listens to the whole clip and writes ALL the speech (Whisper misses and mishears a lot in Uzbek);
     // Whisper's word starts only sharpen the timing
-    const full = await geminiSubtitles(wav, words, to || j.language, context, dur);
+    const full = (await geminiByRanges(wav, j.speech || [], words, to || j.language, context, dur)) || (await geminiSubtitles(wav, words, to || j.language, context, dur));
     if (full) return lead(full);
     if (!words.length) return words;
     // the AI listens to the clip and fixes (same language) or translates each phrase; Whisper keeps the timing
@@ -65,6 +65,52 @@ async function transcribe(src, start, dur, workDir, { model = 'large-v3-turbo', 
 
 // subtitles appear a hair before the voice (Whisper marks word starts a bit late; editors lead by ~0.15 s)
 const lead = (ws, by = 0.15) => ws.map((w) => ({ ...w, start: Math.max(0, +(w.start - by).toFixed(2)), end: Math.max(0.05, +(w.end - by).toFixed(2)) }));
+
+// Best path: VAD gives the exact speech ranges (ms precision); Gemini listens and writes what is said in EACH range.
+// One answer per range -> nothing is skipped, and the timing comes from the audio itself, not from the AI.
+async function geminiByRanges(wav, speech, words, to, context, dur) {
+  const ai = require('./ai');
+  if (!ai.providers().includes('gemini') || !fs.existsSync(wav) || !speech.length) return null;
+  // merge ranges closer than 0.25 s, split very long ones at word gaps later
+  const ranges = [];
+  for (const [a, b] of speech) { const last = ranges[ranges.length - 1]; if (last && a - last[1] < 0.25) last[1] = b; else ranges.push([a, b]); }
+  const target = to === 'uz' ? 'Uzbek in LATIN script (o\' g\' sh ch; never Cyrillic, never Turkish spelling)' : (LANG_NAMES[to] || to);
+  const r = await ai.generateJSON({
+    schema: { type: 'object', additionalProperties: false, required: ['lines'], properties: { lines: { type: 'array', items: { type: 'string' } } } },
+    maxTokens: 6000,
+    parts: [{ text: 'Audio of a gaming video clip:' }, { audio: wav }, { text:
+      `Someone speaks in these ${ranges.length} time ranges (seconds from the start of the audio):\n` +
+      ranges.map((x, i) => `${i + 1}. ${x[0].toFixed(2)}-${x[1].toFixed(2)}`).join('\n') +
+      `\n\nFor EACH range write exactly what is said in it, in ${target}` +
+      ` (if the speaker uses another language, translate naturally; keep slang, tone and emotion).` +
+      ` Video: "${context.title || ''}"${context.subject ? ` (${context.subject})` : ''}.\n` +
+      `Return "lines" with exactly ${ranges.length} items in the same order; an item may be "" only if the range is not speech (noise, music).` +
+      ` No speaker names, no sound descriptions, no quotes.` }],
+  });
+  const lines = r?.data?.lines;
+  if (!Array.isArray(lines) || lines.length !== ranges.length) { if (r) log('Subtitr: Gemini oraliqlar soni mos kelmadi', 'warn'); return null; }
+  const out = [];
+  ranges.forEach(([a, b], i) => {
+    const toks = String(lines[i] || '').replace(/\s+/g, ' ').trim().split(' ').filter(Boolean);
+    if (!toks.length) return;
+    // word timing inside the range: Whisper's word starts where they exist (in order), else shared by word length
+    const ws = words.filter((w) => w.start >= a - 0.15 && w.start < b);
+    const total = toks.reduce((acc, w) => acc + w.length + 1, 0);
+    let t = a;
+    toks.forEach((w, k) => {
+      const prop = a + ((b - a) * toks.slice(0, k).reduce((acc, x) => acc + x.length + 1, 0)) / total;
+      // map the k-th token to the matching Whisper word (same relative position) when counts are close
+      const match = ws.length && Math.abs(ws.length - toks.length) <= 2 ? ws[Math.min(ws.length - 1, Math.round((k * (ws.length - 1)) / Math.max(1, toks.length - 1)))] : null;
+      const st = Math.max(t, match ? Math.max(a, Math.min(b - 0.1, match.start)) : prop);
+      const en = a + ((b - a) * toks.slice(0, k + 1).reduce((acc, x) => acc + x.length + 1, 0)) / total;
+      out.push({ word: w, start: +st.toFixed(2), end: +Math.max(st + 0.12, en).toFixed(2) });
+      t = st + 0.05;
+    });
+  });
+  if (!out.length) return null;
+  log(`Subtitr: Gemini ${ranges.length} ta nutq oralig'ini yozdi`);
+  return out;
+}
 
 // Gemini transcribes (or translates) the clip into short timed phrases; phrase starts snap to Whisper's word starts
 async function geminiSubtitles(wav, words, to, context, dur) {
@@ -236,4 +282,4 @@ async function detectFacecam(src) {
   catch (e) { log('Webkamera aniqlanmadi: ' + e.message.slice(0, 200), 'warn'); return null; }
 }
 
-module.exports = { geminiSubtitles, translateWords, detectFacecam, SAFE, transcribe, buildAss, phrases, fontFamily };
+module.exports = { geminiByRanges, geminiSubtitles, translateWords, detectFacecam, SAFE, transcribe, buildAss, phrases, fontFamily };

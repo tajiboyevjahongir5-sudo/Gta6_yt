@@ -40,10 +40,16 @@ for k in range(a.samples):
             break
     for (x, y, w, h) in found:
         faces.append((k, x / scale, y / scale, w / scale, h / scale))
-    e = cv2.Canny(cv2.cvtColor(cv2.resize(frame, None, fx=ES, fy=ES), cv2.COLOR_BGR2GRAY), 60, 160).astype(np.float32) / 255
+    # edges in every colour channel: a purple frame on green gameplay has almost the same brightness,
+    # so it's invisible in grey but clear in the red/blue channels
+    sm = cv2.resize(frame, None, fx=ES, fy=ES)
+    e = np.zeros(sm.shape[:2], np.uint8)
+    for ch in cv2.split(sm): e |= cv2.Canny(ch, 50, 140)
+    e = e.astype(np.float32) / 255
     edge_sum = e if edge_sum is None else edge_sum + e
-    g = cv2.cvtColor(cv2.resize(frame, None, fx=ES, fy=ES), cv2.COLOR_BGR2GRAY).astype(np.float32)
-    dx, dy = np.abs(np.diff(g, axis=1)), np.abs(np.diff(g, axis=0))
+    g = cv2.cvtColor(sm, cv2.COLOR_BGR2GRAY).astype(np.float32)
+    c3 = sm.astype(np.float32)
+    dx, dy = np.abs(np.diff(c3, axis=1)).max(axis=2), np.abs(np.diff(c3, axis=0)).max(axis=2)
     dx = np.pad(dx, ((0, 0), (0, 1))); dy = np.pad(dy, ((0, 1), (0, 0)))
     gx_sum = dx if gx_sum is None else gx_sum + dx
     v_sum = g if v_sum is None else v_sum + g
@@ -111,7 +117,9 @@ if edge_sum is not None:
                       reverse=near_hi)
         outward = -1 if near_hi else 1          # L/T: gameplay is on the lower side, R/B: on the higher side
         for c in cand:
-            if contrast(axis, (lo + c) / ES, outward, a0, min(a1, eh if axis == 'x' else ew)): return (lo + c) / ES
+            # a strong unbroken line (a drawn webcam frame, e.g. a coloured border) is the border even when the
+            # gameplay next to it is calm; weaker lines must have busy gameplay on their outer side
+            if prof[c] >= 0.6 or contrast(axis, (lo + c) / ES, outward, a0, min(a1, eh if axis == 'x' else ew)): return (lo + c) / ES
         return None
     fy0, fy1, fx0, fx1 = fy - fh * 0.3, fy + fh * 1.3, fx - fw * 0.3, fx + fw * 1.3
     L = line('x', fx - fw * 3.0, fx - fw * 0.25, fy0, fy1, True)
