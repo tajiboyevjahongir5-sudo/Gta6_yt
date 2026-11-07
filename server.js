@@ -311,6 +311,22 @@ const server = http.createServer(async (req, res) => {
 const STATUS_UZ = { queued: '⏳ navbatda', downloading: '⬇️ yuklanmoqda', analyzing: '🔍 tahlil', rendering: '🎬 montaj', waiting: '🔴 efir tugashini kutmoqda', done: '✅ tayyor', failed: '⚠️ xato' };
 const botHandlers = {
   // a cookies.txt sent to the bot is saved straight away (exporting on a computer and sending via Telegram is easiest)
+  async onVideo(v, m) {
+    if (v.file_size && v.file_size > tg.BOT_FILE_LIMIT) {
+      return { text: `📦 Video ${Math.round(v.file_size / 1048576)} MB. Telegram botlarga faqat <b>20 MB</b> gacha faylni yuklab olishga ruxsat beradi.\n\n` +
+        `Katta videoni panel orqali yuklang: <b>Asosiy → 📁 Video faylini yuklash</b> (hajm cheklovi yo'q).`,
+        extra: tg.webAppButton('📁 Panelda yuklash') ? { reply_markup: tg.webAppButton('📁 Panelda yuklash') } : {} };
+    }
+    try {
+      fs.mkdirSync(pipeline.UPLOAD_DIR, { recursive: true });
+      const ext = (path.extname(v.file_name || '') || '.mp4').toLowerCase();
+      const name = `${Date.now()}-${(v.file_name || 'telegram_video').replace(/\.[^.]+$/, '').replace(/[^\w.\- ]+/g, '_').slice(0, 60)}${ext}`;
+      await tg.downloadToFile(v.file_id, path.join(pipeline.UPLOAD_DIR, name));
+      const title = (m.caption || v.file_name || 'Telegram video').replace(/\.[^.]+$/, '').slice(0, 90);
+      const r = pipeline.addJob('upload:' + name, null, { title });
+      return `✅ Video qabul qilindi, navbatga qo'shildi (#${r.id}). Tayyor bo'lganda kliplarni yuboraman.\n<i>Maslahat: video bilan birga izoh yozsangiz, u video nomi sifatida olinadi.</i>`;
+    } catch (e) { return '⚠️ ' + e.message; }
+  },
   async onDocument(doc) {
     if (!/\.txt$/i.test(doc.file_name || '') && doc.mime_type !== 'text/plain') return 'Faqat cookies.txt faylini qabul qilaman';
     if (doc.file_size > 2e6) return 'Fayl juda katta';
@@ -331,7 +347,7 @@ const botHandlers = {
       `Railway → servis → <b>Settings → Networking → Generate Domain</b>, so'ng <b>Redeploy</b>. Keyin qayta /start yozing.` +
       (cfg.PUBLIC_URL ? `\n\nHozirgi PUBLIC_URL: <code>${tg.escHtml(cfg.PUBLIC_URL)}</code> (https bo'lishi kerak)` : '');
     if (cmd === '/start') return { text: `<b>Lahza</b> — stream'lardan eng zo'r lahzalarni kesib, YouTube kanalingizga yuklaydi.\n\n` +
-      `• Stream/video havolasini yuboring — men ishlayman\n• Kuzatiladigan kanallarni paneldagi <b>Manbalar</b> bo'limiga qo'shing\n• Tayyor kliplarni shu yerda tasdiqlaysiz`,
+      `• Stream/video havolasini yoki videoning o'zini (20 MB gacha) yuboring — men ishlayman\n• Kuzatiladigan kanallarni paneldagi <b>Manbalar</b> bo'limiga qo'shing\n• Tayyor kliplarni shu yerda tasdiqlaysiz`,
       extra: tg.webAppButton() ? { reply_markup: tg.webAppButton() } : {} };
     // without an https address Telegram can't open the Web App: say why instead of silently showing no button
     if (cmd === '/navbat') {

@@ -88,10 +88,13 @@ async function handleUpdate(u, h) {
     return call('answerCallbackQuery', { callback_query_id: cq.id, text: (text || 'OK').slice(0, 190) });
   }
   const m = u.message; if (!m) return;
-  if (m.document) {
+  // a video (sent as video, video note, animation or as a file) -> straight into the queue
+  const vid = m.video || m.video_note || m.animation || (m.document && /^video\//.test(m.document.mime_type || '') ? m.document : null);
+  if (vid || m.document) {
     if (!isAdmin(m.from.id)) return call('sendMessage', { chat_id: m.chat.id, text: 'Ruxsat yo\'q' });
-    const out = await h.onDocument(m.document);
-    return call('sendMessage', { chat_id: m.chat.id, text: out, parse_mode: 'HTML' });
+    const out = vid ? await h.onVideo(vid, m) : await h.onDocument(m.document);
+    const msg = typeof out === 'string' ? { text: out } : out;
+    return call('sendMessage', { chat_id: m.chat.id, text: msg.text, parse_mode: 'HTML', reply_to_message_id: m.message_id, ...(msg.extra || {}) });
   }
   if (!m.text) return;
   const chat = m.chat.id, text = m.text.trim();
@@ -112,4 +115,14 @@ async function downloadFile(fileId) {
   return r.text();
 }
 
-module.exports = { downloadFile, enabled, call, verifyInitData, isAdmin, admins, notifyAdmins, sendPhotoToAdmins, startPolling, webAppButton, escHtml };
+// bots may download files up to 20 MB through the Bot API
+const BOT_FILE_LIMIT = 20 * 1024 * 1024;
+async function downloadToFile(fileId, dest) {
+  const f = await call('getFile', { file_id: fileId });
+  const r = await fetch(`https://api.telegram.org/file/bot${BOT_TOKEN}/${f.file_path}`);
+  if (!r.ok) throw new Error('Faylni yuklab bo\'lmadi');
+  fs.writeFileSync(dest, Buffer.from(await r.arrayBuffer()));
+  return dest;
+}
+
+module.exports = { BOT_FILE_LIMIT, downloadToFile, downloadFile, enabled, call, verifyInitData, isAdmin, admins, notifyAdmins, sendPhotoToAdmins, startPolling, webAppButton, escHtml };

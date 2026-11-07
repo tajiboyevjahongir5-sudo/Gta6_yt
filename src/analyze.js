@@ -81,7 +81,7 @@ function pickSegments(score, { count = 10, before = 12, after = 8, duration, ski
   const gap = Math.max(before + after + 10, Math.floor(duration / (count * 6)));
   for (const [s, i] of order) {
     if (segs.length >= count) break;
-    if (s <= 0.3) break;
+    if (s <= 0.3 && segs.length) break;
     if (taken[i]) continue;
     const start = Math.max(0, i - before), end = Math.min(duration, i + after);
     segs.push({ start, end, peak: i, score: Number(s.toFixed(3)) });
@@ -97,8 +97,15 @@ async function findHighlights(file, opts, onProgress = () => {}) {
   let cuts = [];
   try { cuts = await sceneCuts(file, (p) => onProgress(0.6 + p * 0.4), info.duration); } catch (e) { /* audio alone is enough */ }
   const score = scoreSeconds(rms, cuts, info.duration);
-  // collect extra candidates so the AI can re-rank them
-  const candidates = pickSegments(score, { ...opts, count: Math.max(opts.count * 2, 12), duration: info.duration });
+  // short video (e.g. sent to the bot): the whole thing is one moment -> one Short
+  if (info.duration <= 75) {
+    let peak = 0; score.forEach((v, i) => { if (v > score[peak]) peak = i; });
+    onProgress(1);
+    return { info, candidates: [{ start: 0, end: Math.min(info.duration, 58), peak: Math.min(peak, 57), score: Number((score[peak] || 1).toFixed(3)) }], curve: downsample(score, 300) };
+  }
+  // collect extra candidates so the AI can re-rank them; intros/outros skipped in proportion to the length
+  const candidates = pickSegments(score, { ...opts, count: Math.max(opts.count * 2, 12), duration: info.duration,
+    skipStart: Math.min(60, info.duration * 0.05), skipEnd: Math.min(30, info.duration * 0.03) });
   onProgress(1);
   return { info, candidates, curve: downsample(score, 300) };
 }

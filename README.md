@@ -51,6 +51,8 @@ Panel → Kliplar → Shorts → **"📐 YouTube interfeysini ko'rsatish"** — 
 ### Bot buyruqlari
 Havola yuborish — navbatga qo'shadi · `/navbat` · `/kliplar` · `/stat` · `/cookies` · `/yordam`.
 `cookies.txt` faylini botga yuborsangiz — saqlanadi va xato bergan videolar qayta boshlanadi.
+Videoning o'zini botga yuborish mumkin (Telegram cheklovi: **20 MB** gacha; izoh yozsangiz — video nomi bo'ladi). Kattaroq video — panel orqali (📁 Video faylini yuklash, cheklovsiz).
+1 daqiqagacha bo'lgan video butunligicha bitta Shorts bo'ladi.
 Har bir tayyor klip prevyu bilan keladi: **✅ Tasdiqlash / 🚀 Hozir yuklash / ❌ Rad etish**.
 
 ## O'rnatish
