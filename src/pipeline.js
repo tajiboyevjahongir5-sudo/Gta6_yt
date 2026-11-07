@@ -10,10 +10,10 @@ const COOKIES = path.join(DATA_DIR, 'cookies.txt');
 const COOKIES_RUN = path.join(DATA_DIR, 'cookies.run.txt');
 const LOGIN_COOKIES = ['SID', '__Secure-1PSID', '__Secure-3PSID', 'LOGIN_INFO', 'SAPISID'];
 const hasLogin = (text) => { const names = new Set(String(text).split('\n').map((l) => l.split('\t')[5])); return LOGIN_COOKIES.some((n) => names.has(n)); };
-function ytArgs() {
+function ytArgs(useCookies = true) {
   // optional proxy (a residential proxy gets past YouTube's block on data-centre IPs), e.g. http://user:pass@host:port
   const proxy = process.env.YTDLP_PROXY ? ['--proxy', process.env.YTDLP_PROXY] : [];
-  if (!fs.existsSync(COOKIES)) return proxy;
+  if (!useCookies || !fs.existsSync(COOKIES)) return proxy;
   fs.copyFileSync(COOKIES, COOKIES_RUN);
   return [...proxy, '--cookies', COOKIES_RUN];
 }
@@ -76,7 +76,7 @@ function explainYtdlp(e) {
   const wrap = (txt) => new Error(txt + (why ? ` (YouTube: ${why})` : ''));
   if (/confirm your age|age-restricted|Sign in to confirm|not a bot|cookies/i.test(m))
     return wrap(fs.existsSync(COOKIES)
-      ? 'YouTube kirishni talab qildi, cookies eskirgan bo\'lishi mumkin: Sozlamalar → 🍪 YouTube cookies ni yangilang'
+      ? 'YouTube bu cookies\'ni endi qabul qilmayapti (Google sessiyani bekor qilgan — server IP\'si o\'zgarganda shunday bo\'ladi). Yangi cookies yuboring yoki videoni 📁 fayl qilib yuklang'
       : 'YouTube serverni bloklayapti (bot tekshiruvi yoki 18+): cookies.txt faylini botga yuboring yoki Sozlamalar → 🍪 YouTube cookies, keyin "Qayta urinish"');
   if (/HTTP Error 403|Forbidden/i.test(m)) return wrap('YouTube yuqori sifatdagi videoni berishni rad etdi (403), barcha HD usullar sinaldi. Variantlar: 10-20 daqiqadan keyin "Qayta urinish"; cookies\'ni yangilash; videoni 📁 fayl qilib yuklash; yoki Sozlamalar → "Past sifatga ruxsat" (360p)');
   if (/Private video|members-only|Join this channel/i.test(m)) return wrap('Video yopiq yoki faqat a\'zolar uchun');
@@ -131,13 +131,24 @@ const setJob = (id, patch) => {
 const BLOCKED = /confirm your age|Sign in to confirm|not a bot|cookies/i;
 // YouTube sometimes blocks the default web client from data-centre IPs but lets other official clients through
 const ALT_CLIENTS = ['--extractor-args', 'youtube:player_client=tv,web_safari,mweb'];
+// Cookies only when YouTube insists: every use of the session from this server's IP makes Google more likely to
+// kill it (it already sees the IP change on each deploy). Order: no cookies -> cookies -> cookies + other clients.
+// state remembers what worked so the following calls for the same video go straight there.
 async function ytdlp(args, opts, state) {
-  try { return await runYt([...ytArgs(), ...(state.alt ? ALT_CLIENTS : []), ...args], opts); }
-  catch (e) {
-    if (state.alt || !BLOCKED.test(e.message)) throw explainYtdlp(e);
-    state.alt = true;
-    try { return await runYt([...ytArgs(), ...ALT_CLIENTS, ...args], opts); } catch (e2) { throw explainYtdlp(e2); }
+  const tries = [];
+  if (!state.cookies) tries.push({ c: false, alt: false });
+  if (fs.existsSync(COOKIES)) tries.push({ c: true, alt: false });
+  tries.push({ c: fs.existsSync(COOKIES), alt: true });
+  let last;
+  for (const t of tries) {
+    if (state.alt && !t.alt) continue;
+    try {
+      const r = await runYt([...ytArgs(t.c), ...(t.alt ? ALT_CLIENTS : []), ...args], opts);
+      state.cookies = t.c; state.alt = t.alt;
+      return r;
+    } catch (e) { last = e; if (!BLOCKED.test(e.message)) throw explainYtdlp(e); }
   }
+  throw explainYtdlp(last);
 }
 
 async function download(job, dir, quality, allowLow = false) {
@@ -184,7 +195,12 @@ async function download(job, dir, quality, allowLow = false) {
   for (const st of strategies) {
     for (const f of fs.readdirSync(dir)) if (f.startsWith('source.')) fs.rmSync(path.join(dir, f), { force: true });
     try {
-      await runYt([...ytArgs(), ...st.args, ...common], { onLine: progress });
+      try { await runYt([...ytArgs(state.cookies !== false), ...st.args, ...common], { onLine: progress }); }
+      catch (e) {
+        // the info call passed without cookies but the media is refused: once more with them
+        if (state.cookies === false && fs.existsSync(COOKIES) && BLOCKED.test(e.message)) { state.cookies = true; await runYt([...ytArgs(true), ...st.args, ...common], { onLine: progress }); }
+        else throw e;
+      }
       if (st !== strategies[0]) log(`#${job.id}: video "${st.name}" usuli bilan yuklab olindi`);
       lastErr = null; break;
     } catch (e) {
@@ -526,7 +542,7 @@ function normalizeSourceUrl(url) {
   return url;
 }
 async function listSourceVideos(url) {
-  const { out } = await runYt([...ytArgs(), '--flat-playlist', '-I', '1:10', '-J', '--no-warnings', url], { timeoutMs: 120000 }).catch((e) => { throw explainYtdlp(e); });
+  const { out } = await ytdlp(['--flat-playlist', '-I', '1:10', '-J', '--no-warnings', url], { timeoutMs: 120000 }, {});
   const j = JSON.parse(out);
   return { name: j.channel || j.uploader || j.title, entries: (j.entries || []).map((e) => ({ id: e.id, title: e.title || '', duration: e.duration || null,
     url: e.url && /^https?:/.test(e.url) ? e.url : (e.webpage_url || (url.includes('youtube') ? 'https://www.youtube.com/watch?v=' + e.id : e.url)),
