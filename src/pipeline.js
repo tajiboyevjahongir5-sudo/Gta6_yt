@@ -20,7 +20,12 @@ function saveCookies(text) {
   text = String(text || '').replace(/\r/g, '');
   const lines = text.split('\n').filter((l) => l.split('\t').length >= 7);
   if (!lines.length) throw new Error('Bu cookies.txt emas. "Get cookies.txt LOCALLY" kengaytmasi bilan Netscape formatida eksport qiling');
-  if (!lines.some((l) => /youtube\.com|google\.com/.test(l))) throw new Error('Faylda youtube.com cookies yo\'q. YouTube sahifasida turib eksport qiling');
+  // must be exported on youtube.com while signed in: needs YouTube-domain lines and a login cookie
+  if (!lines.some((l) => /(^|\s|\.)youtube\.com\t/.test(l)))
+    throw new Error('Faylda youtube.com cookies yo\'q — boshqa sahifada eksport qilingan. youtube.com sahifasida turib Export qiling (fayl nomi www.youtube.com_cookies.txt bo\'ladi)');
+  const names = new Set(lines.map((l) => l.split('\t')[5]));
+  if (!['SID', '__Secure-1PSID', '__Secure-3PSID', 'LOGIN_INFO', 'SAPISID'].some((n) => names.has(n)))
+    throw new Error('Bu cookies akkauntga kirilmagan holda olingan. youtube.com da Sign in qiling (tepada avatar chiqsin), keyin Export qiling');
   fs.writeFileSync(COOKIES, (text.startsWith('# Netscape') ? '' : '# Netscape HTTP Cookie File\n') + text, { mode: 0o600 });
   log(`YouTube cookies yuklandi (${lines.length} ta)`);
   return lines.length;
