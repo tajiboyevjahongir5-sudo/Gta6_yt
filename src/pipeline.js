@@ -39,6 +39,7 @@ function explainYtdlp(e) {
     return wrap(fs.existsSync(COOKIES)
       ? 'YouTube kirishni talab qildi, cookies eskirgan bo\'lishi mumkin: Sozlamalar → 🍪 YouTube cookies ni yangilang'
       : 'YouTube serverni bloklayapti (bot tekshiruvi yoki 18+): cookies.txt faylini botga yuboring yoki Sozlamalar → 🍪 YouTube cookies, keyin "Qayta urinish"');
+  if (/HTTP Error 403|Forbidden/i.test(m)) return wrap('YouTube videoni yuklab berishni rad etdi (403) — barcha usullar sinaldi. Bir oz kutib "Qayta urinish" qiling; takrorlansa cookies\'ni yangilang yoki videoni 📁 fayl qilib yuklang');
   if (/Private video|members-only|Join this channel/i.test(m)) return wrap('Video yopiq yoki faqat a\'zolar uchun');
   if (/is not available|Video unavailable/i.test(m)) return wrap('Video mavjud emas yoki o\'chirilgan');
   return e;
@@ -111,10 +112,31 @@ async function download(job, dir, quality) {
   setJob(job.id, { title: meta.title, author: meta.uploader || meta.channel, author_url: meta.uploader_url || meta.channel_url,
     video_id: meta.id, duration: meta.duration || null, meta: keep });
   const tmpl = path.join(dir, 'source.%(ext)s');
-  await ytdlp(['-f', `bv*[height<=${quality}][ext=mp4]+ba[ext=m4a]/bv*[height<=${quality}]+ba/b[height<=${quality}]/b`,
-    '--merge-output-format', 'mp4', '--no-playlist', '--no-part', '--concurrent-fragments', '4', '--newline', '-o', tmpl, job.url], {
-    onLine: (l) => { const m = l.match(/\[download\]\s+([\d.]+)%/); if (m) setJob(job.id, { progress: Number(m[1]) / 100 }); },
-  }, state);
+  // YouTube often answers 403 for the media of one client while another works: try several ways, best quality first
+  const fmt = `bv*[height<=${quality}][ext=mp4]+ba[ext=m4a]/bv*[height<=${quality}]+ba/b[height<=${quality}]/b`;
+  const common = ['--merge-output-format', 'mp4', '--no-playlist', '--no-part', '--newline', '--retries', '5', '--fragment-retries', '10',
+    '--extractor-retries', '3', '-o', tmpl, job.url];
+  const strategies = [
+    { name: 'standart', args: ['-f', fmt] },
+    { name: 'TV/Safari/mobil klient', args: ['--extractor-args', 'youtube:player_client=tv,web_safari,mweb', '-f', fmt] },
+    { name: 'web_embedded klient', args: ['--extractor-args', 'youtube:player_client=web_embedded,tv', '-f', fmt] },
+    { name: '360p bir faylli format', args: ['-f', '18/b[height<=480]/b'] },
+  ];
+  const progress = (l) => { const m = l.match(/\[download\]\s+([\d.]+)%/); if (m) setJob(job.id, { progress: Number(m[1]) / 100 }); };
+  let lastErr = null;
+  for (const st of strategies) {
+    for (const f of fs.readdirSync(dir)) if (f.startsWith('source.')) fs.rmSync(path.join(dir, f), { force: true });
+    try {
+      await run(YTDLP, [...ytArgs(), ...st.args, ...common], { onLine: progress });
+      if (st !== strategies[0]) log(`#${job.id}: video "${st.name}" usuli bilan yuklab olindi`);
+      lastErr = null; break;
+    } catch (e) {
+      lastErr = e;
+      if (!/HTTP Error 403|Forbidden|confirm your age|Sign in to confirm|not a bot|Requested format is not available|nsig|signature/i.test(e.message)) break;
+      log(`#${job.id}: "${st.name}" usuli ishlamadi (${(e.message.match(/ERROR:[^|]*/) || [''])[0].slice(0, 90)}), keyingisi sinalmoqda`, 'warn');
+    }
+  }
+  if (lastErr) throw explainYtdlp(lastErr);
   const file = fs.readdirSync(dir).find((f) => f.startsWith('source.') && /\.(mp4|mkv|webm)$/.test(f));
   if (!file) throw new Error('Video yuklab olinmadi');
   const transcript = await fetchTranscript(job.url, dir, state);
