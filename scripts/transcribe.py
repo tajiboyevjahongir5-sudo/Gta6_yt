@@ -49,7 +49,7 @@ for seg in segments:
 speech = []
 try:
     from faster_whisper.vad import get_speech_timestamps, VadOptions
-    for r in get_speech_timestamps(audio, VadOptions(min_silence_duration_ms=280, speech_pad_ms=80, min_speech_duration_ms=180)):
+    for r in get_speech_timestamps(audio, VadOptions(threshold=0.35, min_silence_duration_ms=280, speech_pad_ms=120, min_speech_duration_ms=120)):
         speech.append([round(r["start"] / 16000, 2), round(r["end"] / 16000, 2)])
 except Exception:
     pass

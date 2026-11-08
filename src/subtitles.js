@@ -88,6 +88,7 @@ async function geminiByRanges(wav, speech, words, to, context, dur, { model = 'l
       ` (if the speaker uses another language, translate naturally; keep slang, tone and emotion).` +
       ` Video: "${context.title || ''}"${context.subject ? ` (${context.subject})` : ''}.\n` +
       `Return "lines" with exactly ${ranges.length} items in the same order; an item may be "" only if the range is not speech (noise, music).` +
+      ` If you hear words BETWEEN or outside the ranges, add them to the nearest range's line in spoken order: nothing said may be left out.` +
       ` No speaker names, no sound descriptions, no quotes.` }],
   });
   let lines = r?.data?.lines;
@@ -116,11 +117,54 @@ async function geminiByRanges(wav, speech, words, to, context, dur, { model = 'l
   if (!toks.length) return null;
   // best: lay the correct text onto the audio with Whisper's aligner (only when the subtitles are in the spoken language)
   const same = !spoken || spoken === to || (to === 'uz' && ['tr', 'kk', 'az', 'ky', 'tk', 'uz'].includes(spoken));
-  const forced = same ? await forceAlign(wav, ranges, lines, model, to) : null;
-  const out = forced && forced.length >= toks.length * 0.7 ? mergeForced(forced, toks, words) : alignTokens(toks, words);
+  // 1) MMS letter-level aligner (most precise)  2) Whisper aligner  3) letter matching with Whisper's words
+  const mms = same ? await mmsAlign(wav, toks) : null;
+  let out;
+  if (mms) out = mergeMms(mms, toks, words);
+  else {
+    const forced = same ? await forceAlign(wav, ranges, lines, model, to) : null;
+    out = forced && forced.length >= toks.length * 0.7 ? mergeForced(forced, toks, words) : alignTokens(toks, words);
+  }
   if (!out.length) return null;
   if (!out.length) return null;
   log(`Subtitr: Gemini ${ranges.length} ta nutq oralig'ini yozdi`);
+  return out;
+}
+
+// MMS forced aligner (scripts/mms_align.py, torchaudio): the whole text against the whole clip, letter by letter
+const MMS = path.join(__dirname, '..', 'scripts', 'mms_align.py');
+let mmsMissing = false;
+async function mmsAlign(wav, toks) {
+  if (mmsMissing) return null;
+  const f = wav.replace(/\.wav$/, '') + '_words.json';
+  try {
+    fs.writeFileSync(f, JSON.stringify(toks.map((t) => t.word)));
+    const r = JSON.parse((await run(PY, [MMS, wav, f, process.env.TORCH_HOME || path.join(require('./config').DATA_DIR, 'torch')], { timeoutMs: 20 * 60000 })).out);
+    const ok = r.spans.filter(Boolean).length;
+    if (ok < toks.length * 0.6) { log(`Subtitr: MMS faqat ${ok}/${toks.length} so'zni tekisladi`, 'warn'); return null; }
+    log(`Subtitr: ${ok}/${toks.length} so'z ovozga harf darajasida (MMS) tekislandi`);
+    return r.spans;
+  } catch (e) {
+    if (/No module named|ModuleNotFoundError/.test(e.message)) { mmsMissing = true; log('Subtitr: MMS tekislagich o\'rnatilmagan (torch/torchaudio), Whisper tekislagichi ishlatiladi', 'warn'); }
+    else log('Subtitr: MMS tekislash ishlamadi: ' + String(e.message).slice(-200), 'warn');
+    return null;
+  } finally { fs.rmSync(f, { force: true }); }
+}
+function mergeMms(spans, toks, words) {
+  const fb = alignTokens(toks, words);
+  const out = [];
+  toks.forEach((t, k) => {
+    let st, en;
+    if (spans[k]) [st, en] = spans[k];
+    else { // e.g. a number: between its aligned neighbours
+      const prev = out[out.length - 1]; let nx = k + 1; while (nx < toks.length && !spans[nx]) nx++;
+      const lo = prev ? prev.end : Math.max(0, t.a), hi = nx < toks.length ? spans[nx][0] : Math.max(lo + 0.3, t.b);
+      st = Math.min(Math.max(fb[k].start, lo), hi - 0.05); en = Math.max(st + 0.1, Math.min(fb[k].end, hi));
+    }
+    const prev = out[out.length - 1];
+    if (prev && st < prev.start + 0.05) st = prev.start + 0.05;
+    out.push({ word: t.word, start: +st.toFixed(2), end: +Math.max(st + 0.08, en).toFixed(2) });
+  });
   return out;
 }
 
@@ -450,4 +494,4 @@ async function visionBox(src, j) {
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }
 
-module.exports = { alignTokens, mergeForced, geminiByRanges, geminiSubtitles, translateWords, detectFacecam, SAFE, transcribe, buildAss, phrases, fontFamily };
+module.exports = { alignTokens, mergeForced, mergeMms, geminiByRanges, geminiSubtitles, translateWords, detectFacecam, SAFE, transcribe, buildAss, phrases, fontFamily };

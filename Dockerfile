@@ -22,6 +22,11 @@ ARG WHISPER_MODEL=large-v3-turbo
 # + OpenCV (4.x: has the Haar face detector) to find a streamer webcam in the video
 RUN pip3 install --no-cache-dir --break-system-packages faster-whisper "opencv-python-headless<5" \
  && python3 -c "from faster_whisper import WhisperModel; WhisperModel('${WHISPER_MODEL}', device='cpu', compute_type='int8')"
+# precise subtitle timing: Meta MMS forced aligner (torchaudio, CPU). Its model (~1.2 GB) is downloaded on first use
+# into the data volume, not into the image. Optional: if anything fails, Whisper's aligner is used
+RUN pip3 install --no-cache-dir --break-system-packages --index-url https://download.pytorch.org/whl/cpu \
+      --extra-index-url https://pypi.org/simple torch==2.8.0 torchaudio==2.8.0 \
+ || echo "MMS aligner skipped"
 COPY . .
 ENV NODE_ENV=production
 EXPOSE 3000
