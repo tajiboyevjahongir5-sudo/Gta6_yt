@@ -401,6 +401,14 @@ async function settings() {
       if (Array.isArray(s[k])) v = v.split(',').map((x) => x.trim()).filter(Boolean); else if (typeof s[k] === 'number') v = Number(v) || 0; patch[k] = v; });
     try { await api('/api/settings', { method: 'PATCH', body: patch }); haptic('medium'); toast('Saqlandi'); } catch (e) { toast(e.message); }
   };
+  // Avtomatik saqlash: har bir o'zgarish darhol serverga yoziladi
+  const conv = (el) => { const k = el.dataset.k; let v = el.type === 'checkbox' ? el.checked : el.value;
+    if (Array.isArray(s[k])) v = v.split(',').map((x) => x.trim()).filter(Boolean); else if (typeof s[k] === 'number') v = Number(v) || 0; return v; };
+  const saveOne = async (el) => { try { await api('/api/settings', { method: 'PATCH', body: { [el.dataset.k]: conv(el) } }); haptic('light'); toast('✅ Saqlandi'); } catch (e) { toast(e.message); } };
+  document.querySelectorAll('[data-k]').forEach((el) => {
+    el.addEventListener('change', () => saveOne(el));
+    if (el.tagName === 'TEXTAREA' || ['text', 'number'].includes(el.type)) { let t; el.addEventListener('input', () => { clearTimeout(t); t = setTimeout(() => saveOne(el), 900); }); }
+  });
   if ($('#yton')) $('#yton').onclick = connectYouTube;
   if ($('#ytsetup')) $('#ytsetup').onclick = async (e) => { e.preventDefault(); openYtSetup(await api('/api/youtube/setup')); };
   if ($('#brandBtn')) $('#brandBtn').onclick = openBrand;
