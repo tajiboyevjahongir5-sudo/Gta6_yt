@@ -2,7 +2,7 @@
 const tg = window.Telegram?.WebApp;
 if (tg) {
   tg.ready(); tg.expand();
-  try { tg.setHeaderColor('#0f1012'); tg.setBackgroundColor('#0f1012'); tg.setBottomBarColor?.('#1a1a19'); } catch (e) {}
+  try { tg.setHeaderColor('#0a0b11'); tg.setBackgroundColor('#07080c'); tg.setBottomBarColor?.('#0a0b11'); } catch (e) {}
   // full screen on phones (Bot API 8.0+), and scrolling down must not close the app
   try { if (tg.isVersionAtLeast?.('8.0') && /android|ios/i.test(tg.platform) && !tg.isFullscreen) tg.requestFullscreen(); } catch (e) {}
   try { tg.disableVerticalSwipes?.(); } catch (e) {}
@@ -20,6 +20,8 @@ const when = (t) => { if (!t) return ''; const d = new Date(t); const same = d.t
   return (same ? 'bugun ' : d.toLocaleDateString('uz-UZ', { day: 'numeric', month: 'short' }) + ' ') + d.toLocaleTimeString('uz-UZ', { hour: '2-digit', minute: '2-digit' }); };
 const ago = (t) => { const m = Math.round((Date.now() - t) / 60000); return m < 1 ? 'hozir' : m < 60 ? m + ' daq oldin' : m < 1440 ? Math.round(m / 60) + ' soat oldin' : Math.round(m / 1440) + ' kun oldin'; };
 function toast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.remove('hidden'); clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.add('hidden'), 2600); }
+const appi = (id, c) => `<span class="appi" style="background:${c}"><svg class="ic"><use href="#i-${id}"/></svg></span>`;
+const xBtn = '<button class="icon glass" id="x" aria-label="Yopish"><svg class="ic" style="width:18px;height:18px"><use href="#i-x"/></svg></button>';
 const haptic = (k = 'light') => { try { tg?.HapticFeedback?.impactOccurred(k); } catch (e) {} };
 
 // ---------- auth ----------
@@ -76,14 +78,14 @@ async function home() {
   const ch = o.channel && !o.channel.error ? o.channel : null;
   const warn = [];
   if (o.storage && !o.storage.persistent) warn.push('⚠️ <b>Railway Volume ulanmagan</b> — har deployda kanal ulanishi, kalitlar va kliplar o\'chib ketadi. Railway → servis → <b>Volume</b> qo\'shing, mount path: <b>/data</b>');
-  const connectCta = !o.youtube.connected ? `<div class="card" style="text-align:center"><div style="font-size:30px">📺</div><b>YouTube kanalingizni ulang</b>
+  const connectCta = !o.youtube.connected ? `<div class="card" style="text-align:center"><div style="display:flex;justify-content:center;margin-bottom:8px"><span class="appi" style="background:linear-gradient(160deg,#ff5b52,#e0241b);width:56px;height:56px;border-radius:15px"><svg class="ic" style="width:32px;height:32px"><use href="#i-yt"/></svg></span></div><b>YouTube kanalingizni ulang</b>
     <p class="muted small">Videolar shu kanalga yuklanadi. Ulanganda kanal uchun nom, username, tavsif, banner va logo tayyorlab beriladi.</p>
     <button class="btn primary" id="cta" style="width:100%">Kanalni ulash</button></div>` : '';
   if (!o.ai) warn.push('AI ulanmagan: videolar to\'liq tahlil qilinmaydi. <a href="#" data-go="settings" style="color:inherit">Bepul Gemini kalitini qo\'shing</a>');
   $('#view').innerHTML = `
     ${connectCta}${warn.map((w) => `<div class="warnbox">${w}</div>`).join('')}
     <div class="card"><div class="row"><input type="url" id="url" class="grow" placeholder="Stream yoki video havolasi (YouTube, Twitch, Kick)"><button class="btn primary" id="add">Qo'shish</button></div>
-      <label class="btn" style="display:block;text-align:center;margin-top:8px;cursor:pointer">📁 Video faylini yuklash<input type="file" id="vfile" accept="video/*" hidden></label>
+      <label class="btn" style="display:block;text-align:center;margin-top:8px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px"><svg class="ic" style="width:20px;height:20px"><use href="#i-upload"/></svg>Video faylini yuklash<input type="file" id="vfile" accept="video/*" hidden></label>
       <div id="upl" class="hidden"><div class="small muted" id="uplTxt" style="margin-top:8px"></div><div class="bar"><i id="uplBar" style="width:0"></i></div></div></div>
     <div class="grid">
       <div class="tile"><div class="v">${ch ? num(ch.subscribers) : '—'}</div><div class="l">Obunachilar</div></div>
@@ -171,7 +173,7 @@ async function openClip(id) {
   const c = await api('/api/clips/' + id);
   const editable = !['published', 'uploading'].includes(c.status);
   $('#sheetBody').innerHTML = `
-    <div class="row" style="margin-bottom:10px"><b class="grow">${c.kind === 'short' ? '📱 Shorts' : '🎬 Kompilyatsiya'} • ${dur(c.duration)}</b>${pill(c.status)}<button class="icon" id="x">✕</button></div>
+    <div class="row" style="margin-bottom:10px"><b class="grow">${c.kind === 'short' ? 'Shorts' : 'Kompilyatsiya'} • ${dur(c.duration)}</b>${pill(c.status)}${xBtn}</div>
     ${c.hasFile && c.kind === 'short' ? `<div class="phone"><video src="${media(id, 'video')}" controls playsinline preload="metadata"></video>
       <div class="ui hidden" id="ui"><i class="z top"></i><i class="z right"></i><i class="z bottom"></i>
       <span class="btns">🤍<br>💬<br>🔖<br>↗️<br>🔁</span><span class="desc"><b>@${esc(c.job?.author ? 'kanalingiz' : 'kanal')}</b> <u>Obuna</u><br>${esc(c.title)}</span></div></div>
@@ -262,7 +264,7 @@ function bar(label, pct, value) {
 function growthCard(g) {
   const m = g.monetization, r = g.report;
   const miss = !g.scopes.comments || !g.scopes.analytics;
-  return `<h2>📈 O'sish va monetizatsiya</h2>
+  return `<h2 class="row">${appi('trend', 'linear-gradient(160deg,#4cd964,#1fa34a)')}<span>O'sish va monetizatsiya</span></h2>
     ${miss ? `<div class="warnbox">Komentlarga javob va chuqur tahlil uchun YouTube'ga yangi ruxsatlar kerak: <a href="#" id="reconn2">kanalni qayta ulang</a>.${!g.scopes.analytics ? ' Google Cloud\'da <b>YouTube Analytics API</b> ni ham yoqing (APIs &amp; Services → Library).' : ''}</div>` : ''}
     ${m && !m.error ? `<div class="card"><b>Monetizatsiyaga yo'l (YouTube hamkorlik dasturi)</b>
       ${bar('Obunachilar', m.full.subs, `${num(m.subscribers)} / 1 000`)}
@@ -277,7 +279,7 @@ function growthCard(g) {
         <div class="small muted">Shorts uzunligi: ~${Math.round(r.idealShortSeconds)} s</div>
         ${r.monetizationPlan?.length ? `<b>Monetizatsiyaga tezroq chiqish rejasi</b><ol class="small">${r.monetizationPlan.map((l) => `<li>${esc(l)}</li>`).join('')}</ol>` : ''}`
       : '<div class="small muted">Hali tahlil qilinmagan (har kuni avtomatik). Hozir boshlash uchun tugmani bosing.</div>'}</div>
-    <div class="card"><div class="row"><b class="grow">💬 Komentlarga javoblar</b><span class="small muted">bugun ${g.repliesToday}</span><button class="btn sm" id="greply">Hozir javob berish</button></div>
+    <div class="card"><div class="row">${appi('chat', 'linear-gradient(160deg,#5ac8fa,#0a84ff)')}<b class="grow">Komentlarga javoblar</b><span class="small muted">bugun ${g.repliesToday}</span><button class="btn sm" id="greply">Hozir javob berish</button></div>
       ${g.replies.length ? g.replies.map((x) => `<div style="margin:8px 0"><div class="small muted ellipsis">${esc(x.title || '')}</div><div class="small">🗨 ${esc(x.comment)}</div><div class="small">↳ <b>${esc(x.reply)}</b></div></div>`).join('')
         : '<div class="small muted">Hali javob yozilmagan. Bot har 3 soatda yangi komentlarni tekshiradi.</div>'}</div>`;
 }
@@ -384,8 +386,8 @@ async function settings() {
       : `<p class="muted small">${o.youtube.configured ? 'Kanalingizni ulang — videolar shu kanalga yuklanadi.' : 'Birinchi marta: ilovani Google\'da ro\'yxatdan o\'tkazamiz (yo\'riqnoma ichida), keyin kanal ulanadi.'}</p>${o.channel?.error ? `<div class="warnbox">${esc(o.channel.error)}</div>` : ''}<button class="btn primary" id="yton" style="width:100%">${o.youtube.configured ? 'YouTube kanalni ulash' : 'YouTube\'ni sozlash va ulash'}</button>
         ${o.youtube.configured ? '<p class="small" style="margin:8px 0 0"><a href="#" id="ytsetup" style="color:var(--muted)">Google kalitlarini o\'zgartirish</a></p>' : ''}`}</div>
     ${o.youtube.connected && !o.youtube.canBrand ? '<div class="warnbox">Brendni kanalga o\'rnatish uchun kanalni qayta ulang (yangi ruxsat kerak). <a href="#" id="reconn" style="color:inherit">Qayta ulash</a></div>' : ''}
-    <div class="card"><div class="row"><div style="font-size:28px">🎨</div><div class="grow"><b>Kanal brendi</b><div class="muted small">Nom, username, tavsif, banner va logo</div></div><button class="btn sm" id="brandBtn">Ochish</button></div></div>
-    <div class="card"><div class="row"><div style="font-size:28px">🍪</div><div class="grow"><b>YouTube cookies</b><div class="muted small" id="ckState">…</div></div><button class="btn sm" id="ckBtn">Sozlash</button></div></div>
+    <div class="card"><div class="row">${appi('spark', 'linear-gradient(160deg,#c77dff,#7b2ff7)')}<div class="grow"><b>Kanal brendi</b><div class="muted small">Nom, username, tavsif, banner va logo</div></div><button class="btn sm" id="brandBtn">Ochish</button></div></div>
+    <div class="card"><div class="row">${appi('key', 'linear-gradient(160deg,#ffb340,#ff7a00)')}<div class="grow"><b>YouTube cookies</b><div class="muted small" id="ckState">…</div></div><button class="btn sm" id="ckBtn">Sozlash</button></div></div>
     <h2>Nashr qilish</h2>
     <div class="card">
       ${sw('autoPublish', 'Avto-nashr', 'Yoqilsa, tasdiqlashsiz jadval bo\'yicha yuklanadi')}
@@ -480,7 +482,7 @@ const ext = (url) => (tg?.openLink ? tg.openLink(url) : window.open(url, '_blank
 // one-time Google setup, all inside the web app: links open the right Google Cloud pages, the redirect URI is ready to copy
 function openYtSetup(info) {
   const step = (n, title, body) => `<div class="card"><div class="row" style="align-items:flex-start"><span class="pill blue" style="min-width:26px;justify-content:center">${n}</span><div class="grow"><b>${title}</b><div class="small muted" style="margin-top:4px">${body}</div></div></div></div>`;
-  $('#sheetBody').innerHTML = `<div class="row" style="margin-bottom:6px"><b class="grow">📺 YouTube'ni sozlash</b><button class="icon" id="x">✕</button></div>
+  $('#sheetBody').innerHTML = `<div class="row" style="margin-bottom:6px"><b class="grow">YouTube'ni sozlash</b>${xBtn}</div>
     <p class="small muted">Bu <b>bir marta</b> qilinadi: ilovangiz Google'da ro'yxatdan o'tadi. Keyin kanal bitta tugma bilan ulanadi. ~10 daqiqa.</p>
     ${step(1, 'YouTube API\'ni yoqing', `Kanal ulangan Google akkaunt bilan oching → loyiha yarating (nomi: Lahza) → <b>Enable</b>.<br><button class="btn sm" data-ext="https://console.cloud.google.com/apis/library/youtube.googleapis.com" style="margin-top:6px">Ochish ↗</button>`)}
     ${step(2, 'Ruxsat oynasini sozlang', `App name: <b>Lahza</b>, emailingiz, Audience: <b>External</b> → Create. Keyin <b>Audience → Test users</b>ga emailingizni qo'shing.<br><button class="btn sm" data-ext="https://console.cloud.google.com/auth/overview" style="margin-top:6px">Ochish ↗</button>`)}
@@ -512,7 +514,7 @@ async function openBrand() {
   let k = await api('/api/brand'); const o = await api('/api/overview');
   const draw = () => {
     const v = Date.now();
-    $('#sheetBody').innerHTML = `<div class="row" style="margin-bottom:10px"><b class="grow">🎨 Kanal brendi</b><button class="icon" id="x">✕</button></div>
+    $('#sheetBody').innerHTML = `<div class="row" style="margin-bottom:10px"><b class="grow">Kanal brendi</b>${xBtn}</div>
     ${!k ? `<p class="muted small">AI kanalingiz uchun nom, @username, tavsif, kalit so'zlar, banner (2560×1440) va logo (800×800) tayyorlaydi.</p>` : ''}
     <label class="f">Istaklaringiz (ixtiyoriy)</label><input type="text" id="hint" placeholder="masalan: qisqa, kulgili, o'yin nomi bo'lsin">
     <button class="btn ${k ? '' : 'primary'}" id="gen" style="width:100%;margin-top:8px">${k ? '🔄 Qaytadan yaratish' : '✨ Brend yaratish'}</button>
@@ -554,7 +556,7 @@ async function openBrand() {
 }
 
 function openCookies() {
-  $('#sheetBody').innerHTML = `<div class="row" style="margin-bottom:6px"><b class="grow">🍪 YouTube cookies</b><button class="icon" id="x">✕</button></div>
+  $('#sheetBody').innerHTML = `<div class="row" style="margin-bottom:6px"><b class="grow">YouTube cookies</b>${xBtn}</div>
     <p class="small muted">YouTube 18+ videolarni va serverdan kelgan so'rovlarni faqat akkauntga kirgan holda beradi. Cookies — sizning YouTube'ga kirganingizni bildiruvchi fayl.</p>
     <div class="warnbox">Asosiy akkauntingizni emas, <b>alohida (ikkinchi) Google akkaunt</b> ishlating — yoshi 18+ bo'lsin. Bu fayl parol kabi: hech kimga bermang.</div>
     <div class="card small"><b>Qanday olinadi (kompyuterda, 2 daqiqa):</b>
