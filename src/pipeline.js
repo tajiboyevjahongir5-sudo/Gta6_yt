@@ -313,7 +313,7 @@ async function processJob(job) {
   if (settings.makeShorts && settings.facecamLayout) {
     setJob(job.id, { step: 'Webkamera qidirilmoqda' });
     facecam = await subs.detectFacecam(src);
-    if (facecam) log(`#${job.id}: webkamera topildi (${facecam.w}×${facecam.h}, ${facecam.hits}/${facecam.samples} kadrda) — Shorts tepada kamera, pastda o'yin`);
+    if (facecam) log(`#${job.id}: webkamera topildi (${facecam.w}×${facecam.h} @${facecam.x},${facecam.y}, chegara ${JSON.stringify(facecam.border)}, ${facecam.hits}/${facecam.samples} kadrda) — Shorts tepada kamera, pastda o'yin`);
   }
   // end card: the connected channel's name (or the brand / settings name) and its logo if a brand kit exists
   let channelName = settings.channelName;

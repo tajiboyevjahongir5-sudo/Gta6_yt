@@ -19,6 +19,7 @@ cascades = [cv2.CascadeClassifier(cv2.data.haarcascades + f) for f in
             ("haarcascade_frontalface_default.xml", "haarcascade_frontalface_alt2.xml")]
 
 faces = []  # (frame index, x, y, w, h)
+smalls = {}
 used = 0
 edge_sum = None  # how often each pixel is an edge: the overlay's frame lines are edges in every frame, game edges move
 v_sum = v_sq = None   # temporal variance: gameplay changes all the time, the webcam's room doesn't
@@ -41,22 +42,31 @@ for k in range(a.samples):
             break
     for (x, y, w, h) in found:
         faces.append((k, x / scale, y / scale, w / scale, h / scale))
-    # edges in every colour channel: a purple frame on green gameplay has almost the same brightness,
-    # so it's invisible in grey but clear in the red/blue channels
-    sm = cv2.resize(frame, None, fx=ES, fy=ES)
-    e = np.zeros(sm.shape[:2], np.uint8)
-    for ch in cv2.split(sm): e |= cv2.Canny(ch, 50, 140)
-    e = e.astype(np.float32) / 255
-    edge_sum = e if edge_sum is None else edge_sum + e
-    g = cv2.cvtColor(sm, cv2.COLOR_BGR2GRAY).astype(np.float32)
-    c3 = sm.astype(np.float32)
-    dx, dy = np.abs(np.diff(c3, axis=1)).max(axis=2), np.abs(np.diff(c3, axis=0)).max(axis=2)
-    dx = np.pad(dx, ((0, 0), (0, 1))); dy = np.pad(dy, ((0, 1), (0, 0)))
-    gx_sum = dx if gx_sum is None else gx_sum + dx
-    c_sum = c3 if c_sum is None else c_sum + c3
-    v_sum = g if v_sum is None else v_sum + g
-    v_sq = g * g if v_sq is None else v_sq + g * g
-    gy_sum = dy if gy_sum is None else gy_sum + dy
+    # keep a small copy: the border statistics are computed later only from frames where the webcam is on screen
+    # (streams switch scenes; frames without the webcam would hide its border)
+    smalls[k] = cv2.resize(frame, None, fx=ES, fy=ES)
+
+def stats(keys):
+    global edge_sum, v_sum, v_sq, c_sum, gx_sum, gy_sum
+    edge_sum = v_sum = v_sq = c_sum = gx_sum = gy_sum = None
+    for k in keys:
+        sm = smalls[k]
+        # edges in every colour channel: a purple frame on green gameplay has almost the same brightness,
+        # so it's invisible in grey but clear in the red/blue channels
+        e = np.zeros(sm.shape[:2], np.uint8)
+        for ch in cv2.split(sm): e |= cv2.Canny(ch, 50, 140)
+        e = e.astype(np.float32) / 255
+        edge_sum = e if edge_sum is None else edge_sum + e
+        g = cv2.cvtColor(sm, cv2.COLOR_BGR2GRAY).astype(np.float32)
+        c3 = sm.astype(np.float32)
+        dx, dy = np.abs(np.diff(c3, axis=1)).max(axis=2), np.abs(np.diff(c3, axis=0)).max(axis=2)
+        dx = np.pad(dx, ((0, 0), (0, 1))); dy = np.pad(dy, ((0, 1), (0, 0)))
+        gx_sum = dx if gx_sum is None else gx_sum + dx
+        c_sum = c3 if c_sum is None else c_sum + c3
+        v_sum = g if v_sum is None else v_sum + g
+        v_sq = g * g if v_sq is None else v_sq + g * g
+        gy_sum = dy if gy_sum is None else gy_sum + dy
+    return len(keys)
 
 def out(obj):
     print(json.dumps(obj)); sys.exit(0)
@@ -80,6 +90,7 @@ cx0, cy0, s0 = best[1] + best[3] / 2, best[2] + best[4] / 2, best[3]
 cl = [g for g in faces if abs(g[1] + g[3] / 2 - cx0) < 0.05 * W and abs(g[2] + g[4] / 2 - cy0) < 0.05 * H and 0.7 < g[3] / s0 < 1.4]
 med = lambda i: sorted(g[i] for g in cl)[len(cl) // 2]
 fx, fy, fw, fh = med(1), med(2), med(3), med(4)
+used = stats(sorted({g[0] for g in cl}))
 
 # too small to be a streamer webcam (player photos in a game/broadcast HUD, avatars, kill-feed icons)
 if fh < 0.09 * H:
@@ -134,7 +145,7 @@ if edge_sum is not None:
             mc = c_mean[lo:hi, a0:min(a1, ew)].transpose(1, 0, 2); ts = tstd[lo:hi, a0:min(a1, ew)].T
         sat = mc.max(axis=2) - mc.min(axis=2)
         nb = lambda d: np.abs(mc - np.roll(mc, d, axis=1)).sum(axis=2)
-        colourline = ((sat > 70) & (ts < 14) & (np.minimum(nb(3), nb(-3)) > 60)).mean(axis=0)
+        colourline = ((ts < 14) & (np.minimum(nb(3), nb(-3)) > np.where(sat > 70, 60, 90))).mean(axis=0)  # thin light/dark lines too
         colourline[:3] = 0; colourline[-3:] = 0
         strong = np.nonzero(colourline > 0.6)[0].tolist()
         if strong:  # nearest coloured line to the face is the border, whatever the gameplay does
