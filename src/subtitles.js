@@ -63,8 +63,8 @@ async function transcribe(src, start, dur, workDir, { model = 'large-v3-turbo', 
   } finally { fs.rmSync(wav, { force: true }); }
 }
 
-// subtitles appear a hair before the voice (Whisper marks word starts a bit late; editors lead by ~0.15 s)
-const lead = (ws, by = 0.15) => ws.map((w) => ({ ...w, start: Math.max(0, +(w.start - by).toFixed(2)), end: Math.max(0.05, +(w.end - by).toFixed(2)) }));
+// subtitles appear a hair before the voice (Whisper marks word starts a bit late; a tiny lead reads as in sync)
+const lead = (ws, by = 0.08) => ws.map((w) => ({ ...w, start: Math.max(0, +(w.start - by).toFixed(2)), end: Math.max(0.05, +(w.end - by).toFixed(2)) }));
 
 // Best path: VAD gives the exact speech ranges (ms precision); Gemini listens and writes what is said in EACH range.
 // One answer per range -> nothing is skipped, and the timing comes from the audio itself, not from the AI.
@@ -92,27 +92,99 @@ async function geminiByRanges(wav, speech, words, to, context, dur) {
   });
   const lines = r?.data?.lines;
   if (!Array.isArray(lines) || lines.length !== ranges.length) { if (r) log('Subtitr: Gemini oraliqlar soni mos kelmadi', 'warn'); return null; }
-  const out = [];
-  ranges.forEach(([a, b], i) => {
-    const toks = String(lines[i] || '').replace(/\s+/g, ' ').trim().split(' ').filter(Boolean);
-    if (!toks.length) return;
-    // word timing inside the range: Whisper's word starts where they exist (in order), else shared by word length
-    const ws = words.filter((w) => w.start >= a - 0.15 && w.start < b);
-    const total = toks.reduce((acc, w) => acc + w.length + 1, 0);
-    let t = a;
-    toks.forEach((w, k) => {
-      const prop = a + ((b - a) * toks.slice(0, k).reduce((acc, x) => acc + x.length + 1, 0)) / total;
-      // map the k-th token to the matching Whisper word (same relative position) when counts are close
-      const match = ws.length >= 2 && Math.abs(ws.length - toks.length) <= 1 ? ws[Math.min(ws.length - 1, Math.round((k * (ws.length - 1)) / Math.max(1, toks.length - 1)))] : null;
-      const st = Math.max(t, match ? Math.max(a, Math.min(b - 0.1, match.start)) : prop);
-      const en = a + ((b - a) * toks.slice(0, k + 1).reduce((acc, x) => acc + x.length + 1, 0)) / total;
-      out.push({ word: w, start: +st.toFixed(2), end: +Math.max(st + 0.12, en).toFixed(2) });
-      t = st + 0.05;
-    });
-  });
+  // the AI text per range -> tokens; then each token gets its time from the AUDIO by aligning its letters with the
+  // letters Whisper heard (Whisper's word times are acoustic and precise, its spelling is what is often wrong)
+  const toks = [];
+  ranges.forEach(([a, b], i) => String(lines[i] || '').replace(/\s+/g, ' ').trim().split(' ').filter(Boolean)
+    .forEach((w) => toks.push({ word: w, a, b })));
+  if (!toks.length) return null;
+  const out = alignTokens(toks, words);
+  if (!out.length) return null;
   if (!out.length) return null;
   log(`Subtitr: Gemini ${ranges.length} ta nutq oralig'ini yozdi`);
   return out;
+}
+
+// --- letter-level alignment of the correct text (AI) to the timed recognition (Whisper) ---
+const CYR = { а: 'a', б: 'b', в: 'v', г: 'g', д: 'd', е: 'e', ё: 'yo', ж: 'j', з: 'z', и: 'i', й: 'y', к: 'k', л: 'l', м: 'm', н: 'n',
+  о: 'o', п: 'p', р: 'r', с: 's', т: 't', у: 'u', ф: 'f', х: 'x', ц: 's', ч: 'ch', ш: 'sh', щ: 'sh', ъ: '', ы: 'i', ь: '', э: 'e',
+  ю: 'yu', я: 'ya', ў: 'o', қ: 'q', ғ: 'g', ҳ: 'h', ş: 'sh', ç: 'ch', ğ: 'g', ı: 'i', ö: 'o', ü: 'u', ä: 'a', é: 'e' };
+const norm = (w) => [...String(w).toLowerCase()].map((c) => (c in CYR ? CYR[c] : c)).join('').replace(/[^a-z0-9]/g, '');
+// sounds Whisper confuses in Uzbek: cheap substitutions
+const SIM = new Set(['oa', 'ao', 'ou', 'uo', 'iy', 'yi', 'ie', 'ei', 'kq', 'qk', 'xh', 'hx', 'gk', 'kg', 'dt', 'td', 'bp', 'pb', 'sz', 'zs', 'vw', 'wv', 'jy', 'yj']);
+
+function alignTokens(toks, words) {
+  // Whisper letters with times (each word's span shared evenly by its letters)
+  const wc = []; // {c, t}
+  for (const w of words) {
+    const n = norm(w.word); if (!n) continue;
+    const d = Math.max(0.04, w.end - w.start);
+    [...n].forEach((c, i) => wc.push({ c, t: w.start + (d * i) / n.length }));
+  }
+  // AI letters, each remembers its token
+  const gc = []; // {c, k}
+  toks.forEach((t, k) => [...norm(t.word)].forEach((c, p) => gc.push({ c, k, p })));
+  const n = gc.length, m = wc.length;
+  const matchT = new Array(toks.length).fill(null); // time of first matched letter + its offset in the token
+  let matched = 0;
+  if (n && m && n * m <= 4e6) {
+    // edit distance (costs x2: equal 0, similar 1, other 2, gap 2), then walk back to pair letters
+    const W = m + 1, D = new Int32Array((n + 1) * W);
+    for (let j = 0; j <= m; j++) D[j] = j * 2;
+    for (let i = 1; i <= n; i++) {
+      D[i * W] = i * 2;
+      for (let j = 1; j <= m; j++) {
+        const x = gc[i - 1].c, y = wc[j - 1].c;
+        const sub = x === y ? 0 : SIM.has(x + y) ? 1 : 2;
+        D[i * W + j] = Math.min(D[(i - 1) * W + j - 1] + sub, D[(i - 1) * W + j] + 2, D[i * W + j - 1] + 2);
+      }
+    }
+    const pos = new Array(toks.length).fill(-1); // letter index inside token of its first matched letter
+    let i = n, j = m;
+    while (i > 0 && j > 0) {
+      const x = gc[i - 1].c, y = wc[j - 1].c; const sub = x === y ? 0 : SIM.has(x + y) ? 1 : 2;
+      if (D[i * W + j] === D[(i - 1) * W + j - 1] + sub) {
+        if (sub < 2) { const k = gc[i - 1].k; matched++;
+          // walking backwards: the last assignment is the first letter of the token
+          matchT[k] = wc[j - 1].t; pos[k] = gc[i - 1].p; }
+        i--; j--;
+      } else if (D[i * W + j] === D[(i - 1) * W + j] + 2) i--; else j--;
+    }
+    // first letter not matched -> step back by ~70 ms per letter
+    matchT.forEach((t, k) => { if (t !== null && pos[k] > 0) matchT[k] = t - pos[k] * 0.07; });
+  }
+  const good = n && matched / n >= 0.3;
+  // tokens without a reliable audio time: placed between their neighbours (or by letter share inside their range)
+  const st = toks.map((t, k) => {
+    const v = good ? matchT[k] : null;
+    return v !== null && v >= t.a - 0.3 && v <= t.b + 0.1 ? Math.max(t.a, Math.min(t.b - 0.08, v)) : null;
+  });
+  const len = (k) => norm(toks[k].word).length + 1;
+  for (let k = 0; k < toks.length; k++) {
+    if (st[k] !== null) continue;
+    let e = k; while (e < toks.length && st[e] === null && toks[e].a === toks[k].a) e++; // run of unknowns in this range
+    const { a, b } = toks[k];
+    const from = k > 0 && toks[k - 1].a === a && st[k - 1] !== null ? st[k - 1] + len(k - 1) * 0.06 : a;
+    const to = e < toks.length && toks[e].a === a && st[e] !== null ? st[e] : b;
+    const total = Array.from({ length: e - k }, (_, q) => len(k + q)).reduce((x, y) => x + y, 0) || 1;
+    let t = Math.min(from, to); const span = Math.max(0, to - t);
+    for (let q = k; q < e; q++) { st[q] = t; t += (span * len(q)) / total; }
+    k = e - 1;
+  }
+  // keep order, minimum 60 ms per word; a word ends where the next starts (inside its range) or with its range
+  const out = [];
+  toks.forEach((t, k) => {
+    const prev = out[out.length - 1];
+    const s0 = Math.max(st[k], prev ? prev.start + 0.06 : 0);
+    out.push({ word: t.word, start: s0, end: 0, b: t.b, a: t.a });
+  });
+  out.forEach((w, k) => {
+    const nx = out[k + 1];
+    const cap = w.start + Math.max(0.25, len(k) * 0.09 + 0.2);
+    w.end = Math.max(w.start + 0.1, Math.min(nx && nx.a === w.a ? nx.start : w.b + 0.1, cap));
+  });
+  log(`Subtitr: ${good ? `ovoz bilan ${Math.round((matched / n) * 100)}% harf mos tushdi` : 'tekislash past, oraliq bo\'yicha taqsimlandi'}`);
+  return out.map((w) => ({ word: w.word, start: +w.start.toFixed(2), end: +w.end.toFixed(2) }));
 }
 
 // Gemini transcribes (or translates) the clip into short timed phrases; phrase starts snap to Whisper's word starts
@@ -150,12 +222,8 @@ async function geminiSubtitles(wav, words, to, context, dur) {
     return { ...p, start: st, end: en };
   });
   // phrase -> words, time shared by word length
-  const out = [];
-  for (const p of ph) {
-    const toks = p.text.split(' ').filter(Boolean); const total = toks.reduce((a, w) => a + w.length + 1, 0);
-    let t = p.start;
-    for (const w of toks) { const d = ((p.end - p.start) * (w.length + 1)) / total; out.push({ word: w, start: +t.toFixed(2), end: +(t + d).toFixed(2) }); t += d; }
-  }
+  // phrase -> words, each timed from the audio by letter alignment with Whisper
+  const out = alignTokens(ph.flatMap((p) => p.text.split(' ').filter(Boolean).map((w) => ({ word: w, a: p.start, b: p.end }))), words);
   log(`Subtitr: Gemini ${ph.length} ta ibora yozdi`);
   return out;
 }
@@ -285,4 +353,4 @@ async function detectFacecam(src) {
   catch (e) { log('Webkamera aniqlanmadi: ' + e.message.slice(0, 200), 'warn'); return null; }
 }
 
-module.exports = { geminiByRanges, geminiSubtitles, translateWords, detectFacecam, SAFE, transcribe, buildAss, phrases, fontFamily };
+module.exports = { alignTokens, geminiByRanges, geminiSubtitles, translateWords, detectFacecam, SAFE, transcribe, buildAss, phrases, fontFamily };
