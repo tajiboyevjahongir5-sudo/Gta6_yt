@@ -8,6 +8,7 @@ const { db, getSettings, setSettings, log, parseClip, updateRow, setSecret } = r
 const pipeline = require('./src/pipeline');
 const yt = require('./src/youtube');
 const tg = require('./src/telegram');
+const tgbig = require('./src/tgbig');
 const ai = require('./src/ai');
 const brand = require('./src/brand');
 const { run, dayKey, fmtTime } = require('./src/util');
@@ -335,9 +336,24 @@ const STATUS_UZ = { queued: '⏳ navbatda', downloading: '⬇️ yuklanmoqda', a
 const botHandlers = {
   // a cookies.txt sent to the bot is saved straight away (exporting on a computer and sending via Telegram is easiest)
   async onVideo(v, m) {
-    if (v.file_size && v.file_size > tg.BOT_FILE_LIMIT) {
+    const big = v.file_size && v.file_size > tg.BOT_FILE_LIMIT;
+    if (big && tgbig.enabled()) {
+      // > 20 MB: downloaded over MTProto (up to 2 GB) in the background, then queued
+      const mb = Math.round(v.file_size / 1048576);
+      fs.mkdirSync(pipeline.UPLOAD_DIR, { recursive: true });
+      const ext = (path.extname(v.file_name || '') || '.mp4').toLowerCase();
+      const name = `${Date.now()}-${(v.file_name || 'telegram_video').replace(/\.[^.]+$/, '').replace(/[^\w.\- ]+/g, '_').slice(0, 60)}${ext}`;
+      const title = (m.caption || v.file_name || 'Telegram video').replace(/\.[^.]+$/, '').slice(0, 90);
+      const dest = path.join(pipeline.UPLOAD_DIR, name);
+      tgbig.download(m.message_id, dest, (p) => { if (p % 50 === 0 && p < 100) tg.notifyAdmins(`⬇️ ${mb} MB video: ${p}%`); })
+        .then(() => { const r = pipeline.addJob('upload:' + name, null, { title }); tg.notifyAdmins(`✅ ${mb} MB video yuklandi, navbatga qo'shildi (#${r.id}).`); })
+        .catch((e) => { fs.rmSync(dest, { force: true }); log('Katta video yuklanmadi: ' + e.message, 'warn'); tg.notifyAdmins('⚠️ Katta video yuklanmadi: ' + tg.escHtml(e.message)); });
+      return `⬇️ ${mb} MB video yuklanmoqda… Tugagach navbatga qo'shaman va xabar beraman.`;
+    }
+    if (big) {
       return { text: `📦 Video ${Math.round(v.file_size / 1048576)} MB. Telegram botlarga faqat <b>20 MB</b> gacha faylni yuklab olishga ruxsat beradi.\n\n` +
-        `Katta videoni panel orqali yuklang: <b>Asosiy → 📁 Video faylini yuklash</b> (hajm cheklovi yo'q).`,
+        `Katta videoni panel orqali yuklang: <b>Asosiy → 📁 Video faylini yuklash</b> (hajm cheklovi yo'q).\n\n` +
+        `Yoki botni 2 GB gacha video qabul qiladigan qiling (bir marta): /tgapi`,
         extra: tg.webAppButton('📁 Panelda yuklash') ? { reply_markup: tg.webAppButton('📁 Panelda yuklash') } : {} };
     }
     try {
@@ -365,7 +381,7 @@ const botHandlers = {
     try { const r = pipeline.addJob(url); return r.duplicate ? `Bu video allaqachon bor (#${r.id})` : `✅ Navbatga qo'shildi (#${r.id}). Tayyor bo'lganda kliplarni yuboraman.`; }
     catch (e) { return '⚠️ ' + e.message; }
   },
-  async onCommand(cmd) {
+  async onCommand(cmd, args = [], m = {}) {
     if (cmd === '/start' && !cfg.PUBLIC_URL.startsWith('https://')) return `<b>Lahza</b> ishlayapti, lekin <b>Panel</b> tugmasi chiqmaydi: server manzili (HTTPS domen) topilmadi.\n\n` +
       `Railway → servis → <b>Settings → Networking → Generate Domain</b>, so'ng <b>Redeploy</b>. Keyin qayta /start yozing.` +
       (cfg.PUBLIC_URL ? `\n\nHozirgi PUBLIC_URL: <code>${tg.escHtml(cfg.PUBLIC_URL)}</code> (https bo'lishi kerak)` : '');
@@ -387,6 +403,19 @@ const botHandlers = {
       const o = await overview(); const ch = o.channel;
       return `📊 <b>${tg.escHtml(ch?.title || 'Kanal ulanmagan')}</b>\n` + (ch && !ch.error ? `Obunachilar: ${ch.subscribers}\nKo'rishlar: ${ch.views}\nVideolar: ${ch.videos}\n` : '') +
         `\nYuklangan kliplar: ${o.counts.published}\nNavbatda: ${o.counts.queue}\nTasdiq kutmoqda: ${o.counts.drafts}\nRejada: ${o.counts.scheduled}\nBugun: ${o.counts.todayUploads}/${o.counts.dailyLimit}`;
+    }
+    if (cmd === '/tgapi') {
+      if (args.length === 2 && /^\d+$/.test(args[0]) && /^[0-9a-f]{32}$/i.test(args[1])) {
+        tgbig.setCreds(args[0], args[1]);
+        tg.call('deleteMessage', { chat_id: m.chat.id, message_id: m.message_id }).catch(() => {}); // the hash is a secret
+        try { await tgbig.client(); return '✅ Ulandi! Endi botga 2 GB gacha video yuborishingiz (yoki boshqa botdan forward qilishingiz) mumkin.\n<i>Kalit yozilgan xabaringizni xavfsizlik uchun o\'chirdim.</i>'; }
+        catch (e) { return '⚠️ Ulanmadi: ' + tg.escHtml(e.message) + '\napi_id va api_hash to\'g\'riligini tekshiring.'; }
+      }
+      return `📦 <b>Katta videolar (2 GB gacha)</b>\n\nTelegram botlarga 20 MB dan katta faylni oddiy yo'l bilan bermaydi. Bot Telegram ilovalari protokoli orqali olishi uchun bir marta kalit kerak:\n\n` +
+        `1) Brauzerda <b>my.telegram.org</b> ga kiring (telefon raqamingiz, kod Telegram'ga keladi)\n2) <b>API development tools</b> ni bosing\n` +
+        `3) App title: <code>Lahza</code>, Short name: <code>lahza</code>, Platform: Other → <b>Create application</b>\n` +
+        `4) <b>App api_id</b> (raqam) va <b>App api_hash</b> (32 belgi) chiqadi. Shu botga yozing:\n<code>/tgapi API_ID API_HASH</code>` +
+        (tgbig.enabled() ? '\n\n✅ Hozir ulangan.' : '');
     }
     if (cmd === '/cookies') return `🍪 <b>YouTube cookies</b> — YouTube serverni bloklasa yoki video 18+ bo'lsa kerak.\n\n` +
       `1) Kompyuterda Chrome'ga "Get cookies.txt LOCALLY" kengaytmasini o'rnating\n2) Inkognito oynada youtube.com ga ikkinchi akkaunt bilan kiring\n` +

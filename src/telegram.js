@@ -63,7 +63,7 @@ async function startPolling(handlers) {
   try {
     await call('setMyCommands', { commands: [
       { command: 'start', description: 'Boshqaruv paneli' }, { command: 'navbat', description: 'Ishlanayotgan videolar' },
-      { command: 'kliplar', description: 'Tasdiq kutayotgan kliplar' }, { command: 'stat', description: 'Kanal statistikasi' }, { command: 'cookies', description: 'YouTube cookies yuborish' },
+      { command: 'kliplar', description: 'Tasdiq kutayotgan kliplar' }, { command: 'stat', description: 'Kanal statistikasi' }, { command: 'cookies', description: 'YouTube cookies yuborish' }, { command: 'tgapi', description: '2 GB gacha video qabul qilish' },
       { command: 'yordam', description: 'Qanday ishlaydi' }] });
     if (PUBLIC_URL.startsWith('https://')) await call('setChatMenuButton', { menu_button: { type: 'web_app', text: 'Panel', web_app: { url: PUBLIC_URL + '/' } } });
   } catch (e) { log(e.message, 'warn'); }
