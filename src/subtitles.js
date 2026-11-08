@@ -45,7 +45,7 @@ async function transcribe(src, start, dur, workDir, { model = 'large-v3-turbo', 
     let words = (j.words || []).filter((w) => w.end > 0 && w.start < dur);
     // Gemini listens to the whole clip and writes ALL the speech (Whisper misses and mishears a lot in Uzbek);
     // Whisper's word starts only sharpen the timing
-    const full = (await geminiByRanges(wav, j.speech || [], words, to || j.language, context, dur)) || (await geminiSubtitles(wav, words, to || j.language, context, dur));
+    const full = (await geminiByRanges(wav, j.speech || [], words, to || j.language, context, dur, { model, spoken: j.language })) || (await geminiSubtitles(wav, words, to || j.language, context, dur));
     if (full) return lead(full);
     if (!words.length) return words;
     // the AI listens to the clip and fixes (same language) or translates each phrase; Whisper keeps the timing
@@ -68,7 +68,7 @@ const lead = (ws, by = 0.08) => ws.map((w) => ({ ...w, start: Math.max(0, +(w.st
 
 // Best path: VAD gives the exact speech ranges (ms precision); Gemini listens and writes what is said in EACH range.
 // One answer per range -> nothing is skipped, and the timing comes from the audio itself, not from the AI.
-async function geminiByRanges(wav, speech, words, to, context, dur) {
+async function geminiByRanges(wav, speech, words, to, context, dur, { model = 'large-v3-turbo', spoken = '' } = {}) {
   const ai = require('./ai');
   if (!ai.providers().includes('gemini') || !fs.existsSync(wav) || !speech.length) return null;
   // merge ranges closer than 0.25 s, split very long ones at word gaps later
@@ -90,18 +90,65 @@ async function geminiByRanges(wav, speech, words, to, context, dur) {
       `Return "lines" with exactly ${ranges.length} items in the same order; an item may be "" only if the range is not speech (noise, music).` +
       ` No speaker names, no sound descriptions, no quotes.` }],
   });
-  const lines = r?.data?.lines;
+  let lines = r?.data?.lines;
   if (!Array.isArray(lines) || lines.length !== ranges.length) { if (r) log('Subtitr: Gemini oraliqlar soni mos kelmadi', 'warn'); return null; }
+  // second listen: the AI checks its own draft against the audio and fixes misheard words / spelling
+  const chk = await ai.generateJSON({
+    schema: { type: 'object', additionalProperties: false, required: ['lines'], properties: { lines: { type: 'array', items: { type: 'string' } } } },
+    maxTokens: 8000, quality: 'high',
+    parts: [{ text: 'Audio of a gaming video clip:' }, { audio: wav }, { text:
+      `Below is a draft subtitle for each of ${ranges.length} speech ranges (seconds). Listen to every range again, slowly, and correct ` +
+      `it: wrong or misheard words, missing words, extra words, spelling. The text must be exactly what is said (in ${target}), ` +
+      `nothing invented. Keep a line unchanged if it is already right.` +
+      (context.terms?.length ? ` Names and terms in this video: ${context.terms.slice(0, 30).join(', ')}.` : '') + `\n\n` +
+      ranges.map((x, i) => `${i + 1}. ${x[0].toFixed(2)}-${x[1].toFixed(2)}: ${lines[i] || ''}`).join('\n') +
+      `\n\nReturn "lines" with exactly ${ranges.length} items in the same order.` }],
+  });
+  if (Array.isArray(chk?.data?.lines) && chk.data.lines.length === ranges.length) {
+    const changed = chk.data.lines.filter((l, i) => String(l).trim() !== String(lines[i]).trim()).length;
+    lines = chk.data.lines; log(`Subtitr: ikkinchi tinglashda ${changed} ta qator tuzatildi`);
+  }
   // the AI text per range -> tokens; then each token gets its time from the AUDIO by aligning its letters with the
   // letters Whisper heard (Whisper's word times are acoustic and precise, its spelling is what is often wrong)
   const toks = [];
   ranges.forEach(([a, b], i) => String(lines[i] || '').replace(/\s+/g, ' ').trim().split(' ').filter(Boolean)
     .forEach((w) => toks.push({ word: w, a, b })));
   if (!toks.length) return null;
-  const out = alignTokens(toks, words);
+  // best: lay the correct text onto the audio with Whisper's aligner (only when the subtitles are in the spoken language)
+  const same = !spoken || spoken === to || (to === 'uz' && ['tr', 'kk', 'az', 'ky', 'tk', 'uz'].includes(spoken));
+  const forced = same ? await forceAlign(wav, ranges, lines, model, to) : null;
+  const out = forced && forced.length >= toks.length * 0.7 ? mergeForced(forced, toks, words) : alignTokens(toks, words);
   if (!out.length) return null;
   if (!out.length) return null;
   log(`Subtitr: Gemini ${ranges.length} ta nutq oralig'ini yozdi`);
+  return out;
+}
+
+// Whisper forced alignment (scripts/align.py): the known text -> the moment each word is spoken
+const ALIGN = path.join(__dirname, '..', 'scripts', 'align.py');
+async function forceAlign(wav, ranges, lines, model, lang) {
+  const segFile = wav.replace(/\.wav$/, '') + '_segs.json';
+  try {
+    fs.writeFileSync(segFile, JSON.stringify(ranges.map(([a, b], i) => ({ a, b, text: String(lines[i] || '').replace(/\s+/g, ' ').trim() }))));
+    const r = JSON.parse((await run(PY, [ALIGN, wav, segFile, '--model', model, '--lang', lang], { timeoutMs: 15 * 60000 })).out);
+    log(`Subtitr: ${r.words.length} ta so'z ovozga majburiy tekislandi`);
+    return r.words;
+  } catch (e) { log('Subtitr: majburiy tekislash ishlamadi (' + String(e.message).slice(0, 160) + '), harf tekislash ishlatiladi', 'warn'); return null; }
+  finally { fs.rmSync(segFile, { force: true }); }
+}
+// forced times for the tokens (same order); a token the aligner skipped gets a time from letter alignment
+function mergeForced(forced, toks, words) {
+  const fb = alignTokens(toks, words);
+  let f = 0; const out = [];
+  toks.forEach((t, k) => {
+    const m = forced[f] && forced[f].word === t.word ? forced[f++] : null;
+    let st = m ? m.start : fb[k].start, en = m ? m.end : fb[k].end;
+    st = Math.max(t.a - 0.1, Math.min(t.b - 0.05, st));      // stay inside the speech range
+    const prev = out[out.length - 1];
+    if (prev && st < prev.start + 0.05) st = prev.start + 0.05;
+    en = Math.max(st + 0.08, Math.min(en, st + 1.6, t.b + 0.15));
+    out.push({ word: t.word, start: +st.toFixed(2), end: +en.toFixed(2) });
+  });
   return out;
 }
 
@@ -353,4 +400,4 @@ async function detectFacecam(src) {
   catch (e) { log('Webkamera aniqlanmadi: ' + e.message.slice(0, 200), 'warn'); return null; }
 }
 
-module.exports = { alignTokens, geminiByRanges, geminiSubtitles, translateWords, detectFacecam, SAFE, transcribe, buildAss, phrases, fontFamily };
+module.exports = { alignTokens, mergeForced, geminiByRanges, geminiSubtitles, translateWords, detectFacecam, SAFE, transcribe, buildAss, phrases, fontFamily };
