@@ -179,8 +179,16 @@ async function rankAndDescribe({ candidates, source, settings, context = {} }) {
     `1) First work out what this video really is from ALL the evidence (metadata, transcript, frames${context.youtube ? ', the video itself' : ''}): the exact game or topic. ` +
     `Never assume a game that the evidence doesn't show.` +
     (settings.game ? ` The channel owner says the topic is usually "${settings.game}" — use it only if the evidence agrees.` : '') + `\n` +
-    `2) Score each moment 0-10 for a viewer of this kind of content (low for menus, loading screens, AFK, black screens, ads, silence).\n` +
-    `3) Give each moment a caption, a Shorts title, one reaction emoji and a short meme punchline for its climax.\n` +
+    `2) Score each moment 0-10 like a professional short-form editor would: entertainment, emotional impact, surprise, replay value, ` +
+    `visual interest, whether it is understandable on its own (context), and whether it works as a 60-second vertical Short. ` +
+    `Loudness or motion alone is NOT a reason for a high score. High: unexpected events, impressive plays, funny situations and fails, ` +
+    `strong reactions (face, voice, laughter, shouting), suspense and its payoff, memorable dialogue. ` +
+    `Gaming: kills, multi-kills, headshots, clutches (1vN), aces, fast reactions/flicks, funny mistakes, surprise enemy encounters, ` +
+    `final-round tension, and moments where the streamer's webcam reaction makes it better (a funny reaction can win even if the gameplay is ordinary). ` +
+    `Podcast/interview: strong opinions, funny lines, revelations. Vlog/sport/other: the moment people would share. ` +
+    `Low (0-2): menus, loading screens, AFK, black screens, ads, silence, waiting, repeated near-identical moments (score the weaker duplicate low).\n` +
+    `3) Give each moment a caption, a Shorts title, one reaction emoji and a short meme punchline for its climax. ` +
+    `They must describe what really happens in that moment (no invented kills, events or dialogue); a caption may name a visible event (e.g. "ACE", "1v3 clutch") only if it truly happened.\n` +
     `4) Write the YouTube title, description, tags and thumbnail text for a highlights compilation of this video. ` +
     `Everything must describe what is actually in this video; use real names (game, people, teams) when the evidence shows them.\n` +
     `Write in ${LANG[settings.language] || settings.language}. Channel name: ${settings.channelName}. ` +
