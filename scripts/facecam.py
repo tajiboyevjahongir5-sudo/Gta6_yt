@@ -22,6 +22,7 @@ faces = []  # (frame index, x, y, w, h)
 used = 0
 edge_sum = None  # how often each pixel is an edge: the overlay's frame lines are edges in every frame, game edges move
 v_sum = v_sq = None   # temporal variance: gameplay changes all the time, the webcam's room doesn't
+c_sum = None  # mean colour: a drawn border keeps the same strong colour in every frame
 gx_sum = gy_sum = None  # mean |gradient|: where webcam meets gameplay the picture "jumps" at the same place in every frame
 ES = 0.5         # edge map scale
 for k in range(a.samples):
@@ -52,6 +53,7 @@ for k in range(a.samples):
     dx, dy = np.abs(np.diff(c3, axis=1)).max(axis=2), np.abs(np.diff(c3, axis=0)).max(axis=2)
     dx = np.pad(dx, ((0, 0), (0, 1))); dy = np.pad(dy, ((0, 1), (0, 0)))
     gx_sum = dx if gx_sum is None else gx_sum + dx
+    c_sum = c3 if c_sum is None else c_sum + c3
     v_sum = g if v_sum is None else v_sum + g
     v_sq = g * g if v_sq is None else v_sq + g * g
     gy_sum = dy if gy_sum is None else gy_sum + dy
@@ -102,6 +104,7 @@ if edge_sum is not None:
     stable = edge_sum / used                      # 0..1, fraction of frames where the pixel is an edge
     eh, ew = stable.shape
     gx_avg, gy_avg = gx_sum / used, gy_sum / used
+    c_mean = c_sum / used
     tstd = np.sqrt(np.maximum(v_sq / used - (v_sum / used) ** 2, 0))  # how much each pixel changes over time
     def contrast(axis, pos, outward, a0, a1):
         # a real border has busy gameplay on the outer side; a line inside the webcam has calm room on both sides
@@ -124,6 +127,18 @@ if edge_sum is not None:
         prof = stable[a0:min(a1, eh), lo:hi].mean(axis=0) if axis == 'x' else stable[lo:hi, a0:min(a1, ew)].mean(axis=1)
         grad = gx_avg[a0:min(a1, eh), lo:hi].mean(axis=0) if axis == 'x' else gy_avg[lo:hi, a0:min(a1, ew)].mean(axis=1)
         base = float(np.median(grad)) + 1e-3
+        # coloured frame line (purple/blue/red...): saturated, the same colour in every frame, unlike its neighbours
+        if axis == 'x':
+            mc = c_mean[a0:min(a1, eh), lo:hi]; ts = tstd[a0:min(a1, eh), lo:hi]
+        else:
+            mc = c_mean[lo:hi, a0:min(a1, ew)].transpose(1, 0, 2); ts = tstd[lo:hi, a0:min(a1, ew)].T
+        sat = mc.max(axis=2) - mc.min(axis=2)
+        nb = lambda d: np.abs(mc - np.roll(mc, d, axis=1)).sum(axis=2)
+        colourline = ((sat > 70) & (ts < 14) & (np.minimum(nb(3), nb(-3)) > 60)).mean(axis=0)
+        colourline[:3] = 0; colourline[-3:] = 0
+        strong = np.nonzero(colourline > 0.6)[0].tolist()
+        if strong:  # nearest coloured line to the face is the border, whatever the gameplay does
+            return (lo + (max(strong) if near_hi else min(strong))) / ES
         cand = sorted(set(np.nonzero(prof > 0.45)[0].tolist()) | set(np.nonzero((grad > 3.0 * base) & (grad > 12))[0].tolist()),
                       reverse=near_hi)
         outward = -1 if near_hi else 1          # L/T: gameplay is on the lower side, R/B: on the higher side

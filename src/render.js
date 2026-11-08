@@ -149,11 +149,11 @@ async function renderShort(src, seg, out, workDir, opts = {}) {
   }
 }
 // split-screen for a streamer webcam: the WHOLE webcam on top (its height follows the webcam's shape,
-// 560..860 px, like human editors do), gameplay fills the rest below
+// 760..960 px: big and filling the whole top), gameplay fills the rest below
 const CAM_H = 640;
 function facecamCrops(fc) {
   const even = (n) => Math.max(2, Math.round(n / 2) * 2);
-  const camH = even(Math.min(860, Math.max(560, 1080 * fc.h / fc.w)));
+  const camH = even(Math.min(960, Math.max(760, 1080 * fc.h / fc.w)));
   const ar = 1080 / camH;
   // only trims what doesn't fit those limits (very wide or very tall webcams), keeping the face in view
   let cw = fc.w, ch = fc.h;
