@@ -79,6 +79,17 @@ cl = [g for g in faces if abs(g[1] + g[3] / 2 - cx0) < 0.05 * W and abs(g[2] + g
 med = lambda i: sorted(g[i] for g in cl)[len(cl) // 2]
 fx, fy, fw, fh = med(1), med(2), med(3), med(4)
 
+# too small to be a streamer webcam (player photos in a game/broadcast HUD, avatars, kill-feed icons)
+if fh < 0.09 * H:
+    out({"found": False, "reason": "face too small (HUD/avatar picture)", "hits": best_hits, "samples": used, "width": W, "height": H})
+
+# a photo doesn't move: a real webcam face always changes a little between frames (blinking, talking, head moves)
+if v_sum is not None:
+    x0, y0 = int(fx * ES), int(fy * ES); x1, y1 = int((fx + fw) * ES), int((fy + fh) * ES)
+    motion = float(np.sqrt(np.maximum(v_sq / used - (v_sum / used) ** 2, 0))[y0:y1, x0:x1].mean()) if x1 > x0 and y1 > y0 else 99
+    if motion < 1.8:
+        out({"found": False, "reason": "still picture, not a webcam", "motion": round(motion, 2), "hits": best_hits, "samples": used, "width": W, "height": H})
+
 # the whole video is a webcam (face is huge): no split layout
 if fh > 0.38 * H:
     out({"found": False, "reason": "face fills the frame", "hits": best_hits, "samples": used, "width": W, "height": H})

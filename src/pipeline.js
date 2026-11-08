@@ -342,7 +342,8 @@ async function processJob(job) {
       const m = picked[i]; const title = m.shortTitle || tpl.shortTitle(i);
       const out = path.join(outDir, `short_${i + 1}.mp4`); const thumb = path.join(outDir, `short_${i + 1}.jpg`);
       const peak = m.peak ?? (m.start + m.end) / 2;
-      const asr = { model: settings.asrModel, lang: settings.subtitleLang, to: settings.language, context: { title: meta.title || job.title, subject: video.subject } };
+      const asr = { model: settings.asrModel, lang: settings.subtitleLang, to: settings.language,
+        context: { title: meta.title || job.title, subject: video.subject, terms: [...new Set([video.subject, ...(meta.tags || []), ...(video.hashtags || [])].filter(Boolean))] } };
       let s, words;
       if (settings.storyShorts && info.duration > 150 && score) {
         // story Short: the build-up before the climax with the dead time cut out (jump cuts), ending on the reaction

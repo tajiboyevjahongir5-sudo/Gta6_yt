@@ -16,7 +16,7 @@ const { log } = require('./db');
 const SAFE = { W: 1080, H: 1920, top: 125, bottom: 286, left: 160, right: 160, buttonsX: 935, buttonsY: 1026 };
 SAFE.x0 = SAFE.left; SAFE.x1 = SAFE.W - SAFE.right; SAFE.cx = (SAFE.x0 + SAFE.x1) / 2; // 540
 SAFE.band = { y: 430, h: 1000 };
-SAFE.subBottom = 1400;   // subtitle baseline area: ~234px of clearance above the bottom block (room for a 2-line title)
+SAFE.subBottom = 1500;   // subtitle baseline: ~134px above the channel/description block (starts at ~1634)
 
 const PY = process.env.PYTHON_BIN || 'python3';
 const SCRIPT = path.join(__dirname, '..', 'scripts', 'transcribe.py');
@@ -77,11 +77,14 @@ async function geminiByRanges(wav, speech, words, to, context, dur) {
   const target = to === 'uz' ? 'Uzbek in LATIN script (o\' g\' sh ch; never Cyrillic, never Turkish spelling)' : (LANG_NAMES[to] || to);
   const r = await ai.generateJSON({
     schema: { type: 'object', additionalProperties: false, required: ['lines'], properties: { lines: { type: 'array', items: { type: 'string' } } } },
-    maxTokens: 6000,
+    maxTokens: 8000, quality: 'high',
     parts: [{ text: 'Audio of a gaming video clip:' }, { audio: wav }, { text:
-      `Someone speaks in these ${ranges.length} time ranges (seconds from the start of the audio):\n` +
-      ranges.map((x, i) => `${i + 1}. ${x[0].toFixed(2)}-${x[1].toFixed(2)}`).join('\n') +
-      `\n\nFor EACH range write exactly what is said in it, in ${target}` +
+      `Someone speaks in these ${ranges.length} time ranges (seconds from the start of the audio). After each range: what a rough ` +
+      `automatic recogniser heard there (often wrong, only a hint for names and terms):\n` +
+      ranges.map((x, i) => `${i + 1}. ${x[0].toFixed(2)}-${x[1].toFixed(2)}  (heard: ${words.filter((w) => w.start >= x[0] - 0.15 && w.start < x[1]).map((w) => w.word).join(' ') || '-'})`).join('\n') +
+      (context.terms?.length ? `\n\nNames and terms that may be said in this video: ${context.terms.slice(0, 30).join(', ')}.` : '') +
+      `\n\nTake your time: listen to each range carefully (more than once if needed) and understand the meaning before writing.` +
+      `\nFor EACH range write exactly what is said in it, word for word and correctly spelled, in ${target}` +
       ` (if the speaker uses another language, translate naturally; keep slang, tone and emotion).` +
       ` Video: "${context.title || ''}"${context.subject ? ` (${context.subject})` : ''}.\n` +
       `Return "lines" with exactly ${ranges.length} items in the same order; an item may be "" only if the range is not speech (noise, music).` +
@@ -100,7 +103,7 @@ async function geminiByRanges(wav, speech, words, to, context, dur) {
     toks.forEach((w, k) => {
       const prop = a + ((b - a) * toks.slice(0, k).reduce((acc, x) => acc + x.length + 1, 0)) / total;
       // map the k-th token to the matching Whisper word (same relative position) when counts are close
-      const match = ws.length && Math.abs(ws.length - toks.length) <= 2 ? ws[Math.min(ws.length - 1, Math.round((k * (ws.length - 1)) / Math.max(1, toks.length - 1)))] : null;
+      const match = ws.length >= 2 && Math.abs(ws.length - toks.length) <= 1 ? ws[Math.min(ws.length - 1, Math.round((k * (ws.length - 1)) / Math.max(1, toks.length - 1)))] : null;
       const st = Math.max(t, match ? Math.max(a, Math.min(b - 0.1, match.start)) : prop);
       const en = a + ((b - a) * toks.slice(0, k + 1).reduce((acc, x) => acc + x.length + 1, 0)) / total;
       out.push({ word: w, start: +st.toFixed(2), end: +Math.max(st + 0.12, en).toFixed(2) });
@@ -121,7 +124,7 @@ async function geminiSubtitles(wav, words, to, context, dur) {
     schema: { type: 'object', additionalProperties: false, required: ['phrases'], properties: { phrases: { type: 'array', items: {
       type: 'object', additionalProperties: false, required: ['start', 'end', 'text'],
       properties: { start: { type: 'number' }, end: { type: 'number' }, text: { type: 'string' } } } } } },
-    maxTokens: 6000,
+    maxTokens: 8000, quality: 'high',
     parts: [{ text: 'Audio of a gaming video clip:' }, { audio: wav }, { text:
       `Write subtitles for ALL the speech in this ${dur.toFixed(0)}-second audio (do not skip anything, including short shouts and laughs with words).` +
       ` Video: "${context.title || ''}"${context.subject ? ` (${context.subject})` : ''}.\n` +

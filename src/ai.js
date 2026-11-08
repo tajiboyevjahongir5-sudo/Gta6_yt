@@ -49,7 +49,7 @@ function toGeminiSchema(js) {
 const GEMINI_MODELS = () => [...new Set([GEMINI_MODEL, 'gemini-flash-latest', 'gemini-2.5-flash', 'gemini-flash-lite-latest', 'gemini-2.0-flash'].filter(Boolean))];
 let geminiWorking = null;
 // youtube: { url, fps } — Gemini watches a public YouTube video itself (picture + sound), no download needed
-async function callGemini({ parts, schema, youtube }) {
+async function callGemini({ parts, schema, youtube, quality }) {
   const key = geminiKey(); if (!key) throw new Error('Gemini kaliti yo\'q');
   const gparts = parts.map((p) => (p.image ? { inlineData: { mimeType: 'image/jpeg', data: b64(p.image) } }
     : p.audio ? { inlineData: { mimeType: 'audio/wav', data: b64(p.audio) } } : { text: p.text }));
@@ -63,7 +63,9 @@ async function callGemini({ parts, schema, youtube }) {
   const busy = (st) => st === 503 || st === 500 || st === 502 || st === 504;
   for (const withVideo of youtube ? [true, false] : [false]) {
     // a busy/unknown model -> the next one; when the "working" model is busy, the others get a chance too
-    const models = geminiWorking ? [geminiWorking, ...GEMINI_MODELS().filter((m) => m !== geminiWorking)] : GEMINI_MODELS();
+    // quality "high" (subtitles): the Pro model thinks longer and hears better; its smaller free limit falls back to Flash
+    const models = quality === 'high' ? [...new Set(['gemini-pro-latest', 'gemini-2.5-pro', ...GEMINI_MODELS()])]
+      : geminiWorking ? [geminiWorking, ...GEMINI_MODELS().filter((m) => m !== geminiWorking)] : GEMINI_MODELS();
     let videoRefused = false;
     for (const model of models) {
       // Google's "high demand" 503s and dropped connections are short-lived: wait and retry (2 s, 5 s, 10 s)
@@ -76,14 +78,18 @@ async function callGemini({ parts, schema, youtube }) {
           j = await r.json().catch(() => ({}));
         } catch (e) { lastErr = new Error('Gemini bilan aloqa uzildi: ' + e.message); continue; }
         if (r.ok) {
-          geminiWorking = model;
+          if (quality !== 'high') geminiWorking = model;
           const text = (j.candidates?.[0]?.content?.parts || []).map((x) => x.text || '').join('');
           if (!text) { lastErr = new Error('Gemini bo\'sh javob qaytardi (' + (j.candidates?.[0]?.finishReason || j.promptFeedback?.blockReason || '?') + ')'); break; }
           if (withVideo) log(`Gemini videoni to'liq ko'rdi (${model})`);
           return JSON.parse(text.replace(/^```(?:json)?\s*|\s*```$/g, ''));
         }
         lastErr = new Error(`Gemini ${r.status}: ${j.error?.message || ''}`.slice(0, 300));
-        if (r.status === 429) { lastErr.quota = true; throw lastErr; } // free daily/minute limit reached
+        if (r.status === 429) {                                         // free daily/minute limit of THIS model
+          lastErr.quota = true;
+          if (model !== models[models.length - 1]) break;              // another model has its own limit
+          throw lastErr;
+        }
         if (busy(r.status)) continue;                                   // retry the same model after a pause
         if (r.status !== 404) videoRefused = true;                      // e.g. video not public/too long
         break;                                                          // 404 (unknown model) or refused: next model / no video
@@ -102,9 +108,9 @@ function providers() {
   return order.filter((p) => have[p]);
 }
 const enabled = () => providers().length > 0;
-async function generateJSON({ parts, schema, youtube, effort, maxTokens }) {
+async function generateJSON({ parts, schema, youtube, effort, maxTokens, quality }) {
   for (const p of providers()) {
-    try { return { data: p === 'gemini' ? await callGemini({ parts, schema, youtube }) : await callClaude({ parts, schema, effort, maxTokens }), provider: p }; }
+    try { return { data: p === 'gemini' ? await callGemini({ parts, schema, youtube, quality }) : await callClaude({ parts, schema, effort: quality === 'high' ? 'high' : effort, maxTokens }), provider: p }; }
     catch (e) { log(`AI (${p}) xatosi: ${e.message}${e.quota ? ' — bepul limit tugadi, keyingi variantga o\'tilmoqda' : ''}`, 'warn'); }
   }
   return null;
