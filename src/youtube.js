@@ -6,7 +6,9 @@ const { GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, PUBLIC_URL, SECRET } = require('
 const { getSecret, setSecret, log } = require('./db');
 
 // youtube = manage the channel (banner, description, keywords); upload + readonly for videos and stats
-const SCOPES = ['https://www.googleapis.com/auth/youtube', 'https://www.googleapis.com/auth/youtube.upload', 'https://www.googleapis.com/auth/youtube.readonly'];
+// force-ssl = read and answer comments; yt-analytics = watch time, retention, Shorts views for monetization progress
+const SCOPES = ['https://www.googleapis.com/auth/youtube', 'https://www.googleapis.com/auth/youtube.upload', 'https://www.googleapis.com/auth/youtube.readonly',
+  'https://www.googleapis.com/auth/youtube.force-ssl', 'https://www.googleapis.com/auth/yt-analytics.readonly'];
 const redirectUri = () => `${PUBLIC_URL}/oauth/google/callback`;
 // the app's Google OAuth client: entered once in the web app (stored in the DB), or GOOGLE_CLIENT_ID/SECRET env vars
 function creds() {
@@ -64,6 +66,7 @@ async function accessToken() {
 const connected = () => !!getSecret('yt')?.refresh_token;
 // channels connected before branding existed only granted upload/readonly
 const canBrand = () => (getSecret('yt')?.scope || '').split(' ').includes('https://www.googleapis.com/auth/youtube');
+const hasScope = (name) => (getSecret('yt')?.scope || '').split(' ').includes('https://www.googleapis.com/auth/' + name);
 function disconnect() { setSecret('yt', null); setSecret('channel', null); }
 
 async function api(pathAndQuery, opts = {}) {
@@ -178,4 +181,26 @@ async function channelVideos(max = 500) {
   return { channel, videos };
 }
 
-module.exports = { channelVideos, setCreds, setupInfo, canBrand, applyBranding, configured, connected, authUrl, checkState, finishAuth, disconnect, channelInfo, upload, setThumbnail, videoStats, fitTags };
+// comments: newest threads of one video; reply to a top-level comment
+async function commentThreads(videoId, max = 50) {
+  const j = await api(`commentThreads?part=snippet,replies&videoId=${videoId}&maxResults=${max}&order=time&textFormat=plainText`);
+  return (j.items || []).map((t) => { const c = t.snippet.topLevelComment.snippet;
+    return { id: t.snippet.topLevelComment.id, videoId, text: c.textOriginal || c.textDisplay || '', author: c.authorDisplayName,
+      authorChannel: c.authorChannelId?.value || '', likes: c.likeCount || 0, at: Date.parse(c.publishedAt), replies: t.snippet.totalReplyCount || 0,
+      replyAuthors: (t.replies?.comments || []).map((r) => r.snippet.authorChannelId?.value || '') }; });
+}
+async function replyComment(parentId, text) {
+  return api('comments?part=snippet', { method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ snippet: { parentId, textOriginal: text } }) });
+}
+// YouTube Analytics API v2 (needs the API enabled in the Google Cloud project + the yt-analytics scope)
+async function analytics(params) {
+  const q = new URLSearchParams({ ids: 'channel==MINE', ...params });
+  const r = await fetch('https://youtubeanalytics.googleapis.com/v2/reports?' + q, { headers: { authorization: 'Bearer ' + (await accessToken()) } });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) { const e = new Error(`YouTube Analytics ${r.status}: ${j.error?.message || ''}`); e.status = r.status; throw e; }
+  const cols = (j.columnHeaders || []).map((c) => c.name);
+  return (j.rows || []).map((row) => Object.fromEntries(row.map((v, i) => [cols[i], v])));
+}
+
+module.exports = { commentThreads, replyComment, analytics, hasScope, channelVideos, setCreds, setupInfo, canBrand, applyBranding, configured, connected, authUrl, checkState, finishAuth, disconnect, channelInfo, upload, setThumbnail, videoStats, fitTags };

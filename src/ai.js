@@ -192,7 +192,8 @@ async function rankAndDescribe({ candidates, source, settings, context = {} }) {
     `4) Write the YouTube title, description, tags and thumbnail text for a highlights compilation of this video. ` +
     `Everything must describe what is actually in this video; use real names (game, people, teams) when the evidence shows them.\n` +
     `Write in ${LANG[settings.language] || settings.language}. Channel name: ${settings.channelName}. ` +
-    `Do not mock the original creator, do not invent events, do not use clickbait the video doesn't deliver.` });
+    `Do not mock the original creator, do not invent events, do not use clickbait the video doesn't deliver.` +
+    (() => { const L = require('./growth').lessons(); return L.length ? `\n\nLESSONS FROM THIS CHANNEL'S OWN RESULTS (daily analysis of its uploads — follow them when choosing moments and writing titles):\n- ${L.join('\n- ')}` : ''; })() });
   const r = await generateJSON({ parts, schema: SCHEMA, youtube: context.youtube });
   if (!r) return null;
   const out = r.data;

@@ -252,6 +252,44 @@ function lineChart(el, data, key, label) {
 }
 
 let statDays = 30, statSort = 'new';
+let growthHtml = '';
+// growth card: monetization progress, daily analysis (why videos were / weren't pushed), comment replies
+function bar(label, pct, value) {
+  if (pct == null) return `<div class="small muted" style="margin:6px 0">${label}: ma'lumot yo'q</div>`;
+  return `<div style="margin:8px 0"><div class="row small"><span class="grow">${label}</span><b>${value}</b></div>
+    <div style="height:8px;background:rgba(255,255,255,.08);border-radius:6px;overflow:hidden"><div style="height:100%;width:${Math.max(1, pct)}%;background:${pct >= 100 ? '#3ecf6e' : 'var(--accent, #FFD400)'}"></div></div></div>`;
+}
+function growthCard(g) {
+  const m = g.monetization, r = g.report;
+  const miss = !g.scopes.comments || !g.scopes.analytics;
+  return `<h2>📈 O'sish va monetizatsiya</h2>
+    ${miss ? `<div class="warnbox">Komentlarga javob va chuqur tahlil uchun YouTube'ga yangi ruxsatlar kerak: <a href="#" id="reconn2">kanalni qayta ulang</a>.${!g.scopes.analytics ? ' Google Cloud\'da <b>YouTube Analytics API</b> ni ham yoqing (APIs &amp; Services → Library).' : ''}</div>` : ''}
+    ${m && !m.error ? `<div class="card"><b>Monetizatsiyaga yo'l (YouTube hamkorlik dasturi)</b>
+      ${bar('Obunachilar', m.full.subs, `${num(m.subscribers)} / 1 000`)}
+      ${bar("Shorts ko'rishlar (90 kun)", m.full.shorts, `${num(m.shortsViews90 || 0)} / 10 mln`)}
+      ${bar('Tomosha soatlari (12 oy, uzun videolar)', m.full.hours, m.watchHours365 == null ? '—' : `${num(m.watchHours365)} / 4 000`)}
+      <div class="small muted">Shart: 1 000 obunachi + (10 mln Shorts ko'rish yoki 4 000 soat). Boshlang'ich bosqich: 500 obunachi + 3 mln Shorts ko'rish yoki 3 000 soat + 90 kunda 3 ta video.${m.source === 'estimate' ? " Shorts ko'rishlar taxminiy (Analytics API ulanmagan)." : ''}</div></div>` : ''}
+    <div class="card"><div class="row"><b class="grow">Kunlik tahlil</b><button class="btn sm" id="ganal">Hozir tahlil qilish</button></div>
+      ${r ? `<div class="small muted">${ago2(r.at)} · ${r.videos} ta video${r.analytics ? ' · Analytics bilan' : ''}</div>
+        <p>${esc(r.summary)}</p>
+        ${r.diagnosis.map((d) => `<div style="margin:8px 0"><b>⚠️ ${esc(d.problem)}</b><div class="small muted">${esc(d.evidence)}</div><div class="small">✅ ${esc(d.fix)}</div></div>`).join('')}
+        ${r.lessons.length ? `<b>Keyingi montajlarda qo'llanadi</b><ul class="small">${r.lessons.map((l) => `<li>${esc(l)}</li>`).join('')}</ul>` : ''}
+        <div class="small muted">Shorts uzunligi: ~${Math.round(r.idealShortSeconds)} s</div>
+        ${r.monetizationPlan?.length ? `<b>Monetizatsiyaga tezroq chiqish rejasi</b><ol class="small">${r.monetizationPlan.map((l) => `<li>${esc(l)}</li>`).join('')}</ol>` : ''}`
+      : '<div class="small muted">Hali tahlil qilinmagan (har kuni avtomatik). Hozir boshlash uchun tugmani bosing.</div>'}</div>
+    <div class="card"><div class="row"><b class="grow">💬 Komentlarga javoblar</b><span class="small muted">bugun ${g.repliesToday}</span><button class="btn sm" id="greply">Hozir javob berish</button></div>
+      ${g.replies.length ? g.replies.map((x) => `<div style="margin:8px 0"><div class="small muted ellipsis">${esc(x.title || '')}</div><div class="small">🗨 ${esc(x.comment)}</div><div class="small">↳ <b>${esc(x.reply)}</b></div></div>`).join('')
+        : '<div class="small muted">Hali javob yozilmagan. Bot har 3 soatda yangi komentlarni tekshiradi.</div>'}</div>`;
+}
+function bindGrowth() {
+  if ($('#reconn2')) $('#reconn2').onclick = (e) => { e.preventDefault(); connectYouTube(); };
+  if ($('#ganal')) $('#ganal').onclick = async (e) => { e.target.disabled = true; e.target.textContent = 'Tahlil qilinmoqda…';
+    try { const r = await api('/api/growth/analyze', { method: 'POST', timeout: 300000 }); toast(r.skipped ? 'Hali video kam: ' + r.skipped : 'Tahlil tayyor'); growthHtml = ''; stats(true); }
+    catch (er) { toast(er.message); e.target.disabled = false; e.target.textContent = 'Hozir tahlil qilish'; } };
+  if ($('#greply')) $('#greply').onclick = async (e) => { e.target.disabled = true; e.target.textContent = 'Javob yozilmoqda…';
+    try { const r = await api('/api/growth/reply', { method: 'POST', timeout: 600000 }); toast(r.error === 'scope' ? 'Kanalni qayta ulang' : `${r.replied || 0} ta javob yozildi`); growthHtml = ''; stats(true); }
+    catch (er) { toast(er.message); e.target.disabled = false; e.target.textContent = 'Hozir javob berish'; } };
+}
 const ago2 = (t) => { const sec = Math.round((Date.now() - t) / 1000); return sec < 60 ? `${sec} s oldin` : ago(t); };
 const vdur = (s) => (s ? dur(s) : '');
 async function stats(silent) {
@@ -279,6 +317,7 @@ async function stats(silent) {
       <div class="tile"><div class="l">🎬 Videolar</div><div class="v">${num(k.long?.views || 0)}</div><div class="l">${k.long?.videos || 0} ta · o'rtacha ${num(avg(k.long))}</div></div>
       <div class="tile"><div class="l">📱 Shorts</div><div class="v">${num(k.short?.views || 0)}</div><div class="l">${k.short?.videos || 0} ta · o'rtacha ${num(avg(k.short))}</div></div>
     </div>
+    <div id="growth">${growthHtml}</div>
     <h2>Kanaldagi barcha videolar (${s.videos.length})</h2>
     <div class="seg">${[['new', 'Yangi'], ['views', 'Ko\'rishlar'], ['likes', 'Layklar'], ['comments', 'Izohlar']].map(([v, t]) => `<button data-sort="${v}" class="${v === statSort ? 'on' : ''}">${t}</button>`).join('')}</div>
     <div class="card list">${s.videos.length ? s.videos.map((v) => `<div class="it" data-yt="${esc(v.id)}" data-short="${v.short ? 1 : 0}" style="cursor:pointer">
@@ -288,6 +327,8 @@ async function stats(silent) {
         <div class="small muted">${new Date(v.published).toLocaleDateString('uz-UZ')}${v.short ? ' · <span class="pill">Shorts</span>' : ''}${v.lahza ? ' · <span class="pill good">Lahza</span>' : ''}${v.privacy && v.privacy !== 'public' ? ` · <span class="pill warn">${v.privacy === 'private' ? 'yopiq' : 'havola orqali'}</span>` : ''}</div></div></div>`).join('')
       : `<div class="muted small">${s.connected ? (s.refresh.running ? 'YouTube\'dan olinmoqda…' : 'Kanalda hali video yo\'q') : 'Kanal ulanmagan'}</div>`}</div>`;
   if (silent) window.scrollTo(0, scrollY);
+  if (growthHtml) bindGrowth();
+  if (!silent || !growthHtml) api('/api/growth', { timeout: 60000 }).then((g) => { if (!here('stats') || !$('#growth')) return; growthHtml = growthCard(g); $('#growth').innerHTML = growthHtml; bindGrowth(); }).catch(() => {});
   barChart($('#c1'), s.series, 'views', "ko'rish");
   lineChart($('#c2'), s.subs, 'subscribers', 'obunachi');
   document.querySelectorAll('[data-d]').forEach((b) => (b.onclick = () => { statDays = +b.dataset.d; stats(); }));
@@ -306,11 +347,11 @@ async function sources() {
     <div class="card">
       <label class="f">Kanal havolasi</label><input type="url" id="su" placeholder="https://www.youtube.com/@streamer yoki twitch.tv/streamer">
       <div class="row"><div class="grow"><label class="f">Sarlavhada bo'lishi kerak</label><input type="text" id="sk" value="" placeholder="bo'sh = hammasi, masalan: GTA"></div>
-      <div style="width:110px"><label class="f">Min. daqiqa</label><input type="number" id="sm" value="30"></div></div>
+      <div style="width:110px"><label class="f">Min. daqiqa</label><input type="number" id="sm" value="10"></div></div>
       <label class="f">Mualliflik uchun ism (tavsifga yoziladi)</label><input type="text" id="sc" placeholder="Streamer nomi">
       <div class="switch"><span class="small">Muallif kliplash uchun ruxsat bergan</span><input type="checkbox" id="sp"></div>
       <button class="btn primary" id="sadd" style="width:100%;margin-top:8px">Kuzatishni boshlash</button>
-      <p class="muted small">Har 20 daqiqada tekshiriladi. Efir tugab, yozuvi chiqqach avtomatik navbatga tushadi. Eski videolar olinmaydi.</p>
+      <p class="muted small">Har 20 daqiqada tekshiriladi: kanalga yangi yuklangan <b>uzun videolar</b> va tugagan <b>live efirlar</b> avtomatik navbatga tushadi va ulardan Shorts tayyorlanadi. Kanalning Shorts videolariga tegilmaydi. Eski videolar olinmaydi.</p>
     </div>
     ${list.map((s) => `<div class="card"><div class="row"><b class="grow ellipsis">${esc(s.name)}</b>${s.permission ? '<span class="pill good">✓ ruxsat</span>' : '<span class="pill warn">ruxsat?</span>'}</div>
       <div class="muted small ellipsis">${esc(s.url)}</div>
@@ -322,7 +363,7 @@ async function sources() {
   $('#sadd').onclick = async (e) => {
     const url = $('#su').value.trim(); if (!url) return toast('Havolani kiriting');
     e.target.disabled = true; e.target.textContent = 'Tekshirilmoqda…';
-    try { const r = await api('/api/sources', { method: 'POST', body: { url, keyword: $('#sk').value.trim(), min_minutes: +$('#sm').value || 20, credit: $('#sc').value.trim(), permission: $('#sp').checked } });
+    try { const r = await api('/api/sources', { method: 'POST', body: { url, keyword: $('#sk').value.trim(), min_minutes: +$('#sm').value || 10, credit: $('#sc').value.trim(), permission: $('#sp').checked } });
       toast('Qo\'shildi: ' + (r.name || '')); sources(); } catch (er) { toast(er.message); e.target.disabled = false; e.target.textContent = 'Kuzatishni boshlash'; }
   };
   document.querySelectorAll('[data-tog]').forEach((b) => (b.onclick = async () => { await api('/api/sources/' + b.dataset.tog, { method: 'PATCH', body: { active: b.dataset.a !== '1' } }); sources(); }));
@@ -355,6 +396,8 @@ async function settings() {
     <h2>Montaj</h2>
     <div class="card">
       ${sw('makeLong', 'Kompilyatsiya video (16:9)')}
+      ${sw('autoReply', 'Komentlarga avtomatik javob', "Bot kanal egasi sifatida, odamdek javob yozadi (har 3 soatda)")}
+      ${sw('autoTune', "Kunlik tahlil bo'yicha o'zini sozlash", "Natijalarga qarab keyingi Shorts uzunligi, lahza tanlash va nomlarni tuzatadi")}
       ${sw('makeShorts', 'Shorts (9:16)')}
       <div class="row"><div class="grow">${inp('highlightCount', 'Lahzalar soni', 'number')}</div><div class="grow">${inp('targetMinutes', 'Video uzunligi (daq)', 'number')}</div></div>
       <div class="row"><div class="grow">${inp('shortsPerVideo', 'Har streamdan Shorts', 'number')}</div><div class="grow"><label class="f">Sifat</label><select data-k="quality">${[[720, '720p (tez)'], [1080, '1080p'], [1440, '1440p (eng yuqori)']].map(([q, t]) => `<option value="${q}" ${+s.quality === q ? 'selected' : ''}>${t}</option>`).join('')}</select></div></div>

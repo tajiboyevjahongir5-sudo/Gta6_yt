@@ -220,6 +220,16 @@ async function api(req, res, url) {
     if (empty) await r;
     return send(res, 200, stats(Math.min(90, Math.max(7, Number(url.searchParams.get('days')) || 30)), url.searchParams.get('sort')));
   }
+  if (p === '/api/growth' && m === 'GET') {
+    const growth = require('./src/growth');
+    let mon = null; try { mon = yt.connected() ? await growth.monetization() : null; } catch (e) { mon = { error: e.message }; }
+    const replies = db.prepare('SELECT r.comment, r.reply, r.at, v.title FROM comment_replies r LEFT JOIN channel_videos v ON v.id = r.video_id WHERE r.skipped = 0 ORDER BY r.at DESC LIMIT 15').all();
+    const today = count('SELECT COUNT(*) n FROM comment_replies WHERE skipped = 0 AND at > ' + (Date.now() - 86400000));
+    return send(res, 200, { report: getSecretSafe('growthReport'), monetization: mon, replies, repliesToday: today,
+      scopes: { comments: yt.hasScope('youtube.force-ssl'), analytics: yt.hasScope('yt-analytics.readonly') } });
+  }
+  if (p === '/api/growth/analyze' && m === 'POST') { const r = await require('./src/growth').analyze(); return send(res, r?.error ? 500 : 200, r?.error ? { error: r.error } : { ok: true, skipped: r?.skipped }); }
+  if (p === '/api/growth/reply' && m === 'POST') { const r = await require('./src/growth').replyComments({ force: true }); return send(res, 200, r || {}); }
   if (p === '/api/stats/refresh' && m === 'POST') { await pipeline.refreshChannel(0); return send(res, 200, { ok: true }); }
 
   if (p === '/api/sources' && m === 'GET') return send(res, 200, db.prepare('SELECT id, url, name, keyword, min_minutes, permission, credit, active, last_checked FROM sources ORDER BY id DESC').all());

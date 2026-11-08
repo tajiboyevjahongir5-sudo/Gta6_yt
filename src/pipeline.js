@@ -535,19 +535,34 @@ async function refreshStats() {
 }
 
 // ---------------- sources (auto-watch channels) ----------------
+// a YouTube channel is watched on two tabs: /videos (long uploads) and /streams (finished lives). The /shorts tab
+// is never read, and anything under 3 minutes is skipped, so Shorts are never used as a source.
+const ytChannelRe = /^(https?:\/\/(?:www\.|m\.)?youtube\.com\/(?:@[\w.-]+|channel\/[\w-]+|c\/[\w-]+))(?:\/(?:streams|videos|featured|shorts))?$/;
 function normalizeSourceUrl(url) {
-  url = String(url).trim().replace(/\/+$/, '');
-  if (/youtube\.com\/(@[\w.-]+|channel\/[\w-]+|c\/[\w-]+)$/.test(url)) return url + '/streams';
+  url = String(url).trim().replace(/[?#].*$/, '').replace(/\/+$/, '');
+  const yt = url.match(ytChannelRe); if (yt) return yt[1];
   if (/twitch\.tv\/[\w]+$/.test(url)) return url + '/videos?filter=archives';
   if (/kick\.com\/[\w-]+$/.test(url)) return url + '/videos';
   return url;
 }
-async function listSourceVideos(url) {
+async function listTab(url) {
   const { out } = await ytdlp(['--flat-playlist', '-I', '1:10', '-J', '--no-warnings', url], { timeoutMs: 120000 }, {});
   const j = JSON.parse(out);
   return { name: j.channel || j.uploader || j.title, entries: (j.entries || []).map((e) => ({ id: e.id, title: e.title || '', duration: e.duration || null,
     url: e.url && /^https?:/.test(e.url) ? e.url : (e.webpage_url || (url.includes('youtube') ? 'https://www.youtube.com/watch?v=' + e.id : e.url)),
-    live: e.live_status === 'is_live' || e.live_status === 'is_upcoming' })) };
+    live: e.live_status === 'is_live' || e.live_status === 'is_upcoming',
+    short: /\/shorts\//.test(e.url || '') || (e.duration && e.duration < 180) })) };
+}
+async function listSourceVideos(url) {
+  const yt = url.match(ytChannelRe);
+  if (!yt) return listTab(url);
+  const base = yt[1]; let name = ''; const entries = []; const errs = [];
+  for (const tab of ['/videos', '/streams']) {
+    try { const r = await listTab(base + tab); name = name || r.name; for (const e of r.entries) if (!entries.some((x) => x.id === e.id)) entries.push(e); }
+    catch (e) { errs.push(e); } // a channel without lives has no /streams tab
+  }
+  if (!entries.length && errs.length === 2) throw errs[0];
+  return { name: (name || '').replace(/ - (Videos|Live)$/i, ''), entries };
 }
 async function addSource({ url, keyword = '', min_minutes = 20, permission = 0, credit = '' }) {
   url = normalizeSourceUrl(url);
@@ -564,13 +579,21 @@ async function checkSources() {
     try {
       const { entries } = await listSourceVideos(s.url);
       const seen = new Set(JSON.parse(s.seen || '[]'));
+      // sources added when only lives were watched: their older /videos uploads are not "new" — mark them seen once
+      const norm = normalizeSourceUrl(s.url);
+      if (norm !== s.url) {
+        for (const e of entries) seen.add(e.id);
+        db.prepare('UPDATE sources SET url = ?, seen = ?, last_checked = ? WHERE id = ?').run(norm, JSON.stringify([...seen].slice(-300)), Date.now(), s.id);
+        continue;
+      }
       for (const e of entries) {
         if (seen.has(e.id) || e.live) continue; // live ones are picked up once they become a VOD
         seen.add(e.id);
+        if (e.short) continue; // Shorts are never used as a source
         if (s.keyword && !e.title.toLowerCase().includes(s.keyword.toLowerCase())) continue;
         if (e.duration && e.duration < s.min_minutes * 60) continue;
         const r = addJob(e.url, s.id, { title: e.title, author: s.credit || s.name });
-        if (!r.duplicate) await tg.notifyAdmins(`🆕 ${tg.escHtml(s.name)}: yangi stream topildi\n<b>${tg.escHtml(e.title)}</b>\nNavbatga qo'shildi (#${r.id})`);
+        if (!r.duplicate) await tg.notifyAdmins(`🆕 ${tg.escHtml(s.name)}: yangi video topildi\n<b>${tg.escHtml(e.title)}</b>\nNavbatga qo'shildi (#${r.id})`);
       }
       db.prepare('UPDATE sources SET seen = ?, last_checked = ? WHERE id = ?').run(JSON.stringify([...seen].slice(-300)), Date.now(), s.id);
     } catch (e) { log(`Manba tekshirilmadi (${s.name}): ${e.message}`, 'warn'); }
@@ -618,6 +641,7 @@ function start() {
   every(3 * 3600000, refreshStats);
   every(10 * 60000, () => refreshChannel(5 * 60000));
   every(3600000, async () => cleanOldSources());
+  require('./growth').start(every);
 }
 
 module.exports = { redoJob, removeKeptSource, refreshChannel, channelRefreshState, COOKIES, UPLOAD_DIR, saveCookies, start, addJob, addSource, checkSources, scheduleClip, refreshStats, announceClip, chooseMoments, normalizeSourceUrl, kick };

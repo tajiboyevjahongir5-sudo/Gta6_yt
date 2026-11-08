@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS stats_daily (day TEXT, clip_id INTEGER, views INTEGER
 CREATE TABLE IF NOT EXISTS channel_daily (day TEXT PRIMARY KEY, subscribers INTEGER, views INTEGER, videos INTEGER);
 CREATE TABLE IF NOT EXISTS channel_videos (id TEXT PRIMARY KEY, title TEXT, thumb TEXT, published INTEGER, views INTEGER, likes INTEGER,
   comments INTEGER, duration INTEGER, privacy TEXT, updated INTEGER);
+CREATE TABLE IF NOT EXISTS comment_replies (comment_id TEXT PRIMARY KEY, video_id TEXT, comment TEXT, reply TEXT, skipped INTEGER DEFAULT 0, at INTEGER);
 CREATE TABLE IF NOT EXISTS logs (id INTEGER PRIMARY KEY, ts INTEGER, level TEXT, msg TEXT);
 `);
 
@@ -34,6 +35,9 @@ CREATE TABLE IF NOT EXISTS logs (id INTEGER PRIMARY KEY, ts INTEGER, level TEXT,
 for (const sql of ['ALTER TABLE jobs ADD COLUMN meta TEXT', 'ALTER TABLE clips ADD COLUMN category TEXT']) { try { db.exec(sql); } catch (e) { /* already there */ } }
 
 const DEFAULTS = {
+  autoReply: true,             // answer comments on the channel's videos like a person (a few times a day)
+  repliesPerDay: 25,           // each reply costs 50 of the 10,000 daily YouTube API units (an upload costs 1,600)
+  autoTune: true,              // daily performance analysis adjusts the next edits (Shorts length, titles, moment choice)
   autoPublish: false,          // false: each clip waits for your approval in the bot / web app
   privacy: 'public',           // public | unlisted | private
   publishTimes: ['13:00', '19:00'], // Tashkent time slots for scheduled uploads
