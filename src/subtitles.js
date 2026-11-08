@@ -396,8 +396,58 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
 const FACECAM = path.join(__dirname, '..', 'scripts', 'facecam.py');
 async function detectFacecam(src) {
-  try { const { out } = await run(PY, [FACECAM, src], { timeoutMs: 10 * 60000 }); const j = JSON.parse(out); return j.found ? j : null; }
+  let j;
+  try { const { out } = await run(PY, [FACECAM, src], { timeoutMs: 10 * 60000 }); j = JSON.parse(out); }
   catch (e) { log('Webkamera aniqlanmadi: ' + e.message.slice(0, 200), 'warn'); return null; }
+  if (!j.found) return null;
+  try { await visionBox(src, j); } catch (e) { log('Webkamera: AI ramka tekshiruvi ishlamadi: ' + e.message.slice(0, 160), 'warn'); }
+  return j;
+}
+
+// the AI looks at frames and marks the webcam rectangle (it "sees" where the camera picture ends and gameplay begins,
+// which pixel statistics miss on some stream layouts); the pixel-found border is kept where it agrees (±2.5%)
+async function visionBox(src, j) {
+  const ai = require('./ai');
+  if (!ai.providers().includes('gemini') || !j.times?.length) return;
+  const os = require('os');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cam-'));
+  try {
+    const ts = [j.times[Math.floor(j.times.length * 0.25)], j.times[Math.floor(j.times.length * 0.75)]].filter((t, i, a) => a.indexOf(t) === i);
+    const imgs = [];
+    for (const [i, t] of ts.entries()) {
+      const f = path.join(dir, `f${i}.jpg`);
+      await run(FFMPEG, ['-y', '-v', 'error', '-ss', String(t), '-i', src, '-frames:v', '1', '-vf', 'scale=1280:-2', '-q:v', '3', f]);
+      if (fs.existsSync(f)) imgs.push(f);
+    }
+    if (!imgs.length) return;
+    const r = await ai.generateJSON({
+      schema: { type: 'object', additionalProperties: false, required: ['ymin', 'xmin', 'ymax', 'xmax'],
+        properties: { ymin: { type: 'number' }, xmin: { type: 'number' }, ymax: { type: 'number' }, xmax: { type: 'number' } } },
+      parts: [...imgs.map((f) => ({ image: f })), { text:
+        `Frames from a gameplay live stream (${j.width}x${j.height}). The streamer's real-life webcam is overlaid on the game as a rectangle ` +
+        `(the person sits at about x=${Math.round((j.face[0] + j.face[2] / 2) / j.width * 1000)}, y=${Math.round((j.face[1] + j.face[3] / 2) / j.height * 1000)} on a 0-1000 scale).\n` +
+        `Give the bounding box of the webcam CAMERA PICTURE only: where the real room ends. Exclude any coloured frame/border line around it ` +
+        `and exclude ALL game graphics next to it. Edges must be exact. Coordinates on a 0-1000 scale of the frame (ymin, xmin, ymax, xmax).` }],
+    });
+    const b = r?.data; if (!b) return;
+    const X0 = b.xmin / 1000 * j.width, X1 = b.xmax / 1000 * j.width, Y0 = b.ymin / 1000 * j.height, Y1 = b.ymax / 1000 * j.height;
+    const [fx, fy, fw, fh] = j.face, cx = fx + fw / 2, cy = fy + fh / 2;
+    if (!(X1 - X0 > fw * 1.3 && Y1 - Y0 > fh * 1.3 && X0 < cx && cx < X1 && Y0 < cy && cy < Y1 && (X1 - X0) * (Y1 - Y0) < 0.8 * j.width * j.height)) {
+      log(`Webkamera: AI ramkasi yuzga mos emas, e'tiborsiz (${Math.round(X0)},${Math.round(Y0)}-${Math.round(X1)},${Math.round(Y1)})`, 'warn'); return;
+    }
+    // pixel border lines agree with the AI -> exact pixel edge; otherwise the AI edge, 0.6% inside (never shows the border)
+    const [L, R, T, B] = j.lines || [];
+    const tolX = 0.025 * j.width, tolY = 0.025 * j.height, inX = 0.006 * j.width, inY = 0.006 * j.height;
+    const x0 = L != null && Math.abs(L - X0) < tolX ? L + 4 : Math.max(0, X0 + (X0 < tolX ? 0 : inX));
+    const x1 = R != null && Math.abs(R - X1) < tolX ? R - 4 : Math.min(j.width, X1 - (j.width - X1 < tolX ? 0 : inX));
+    const y0 = T != null && Math.abs(T - Y0) < tolY ? T + 4 : Math.max(0, Y0 + (Y0 < tolY ? 0 : inY));
+    const y1 = B != null && Math.abs(B - Y1) < tolY ? B - 4 : Math.min(j.height, Y1 - (j.height - Y1 < tolY ? 0 : inY));
+    const before = `${j.x},${j.y} ${j.w}x${j.h}`;
+    j.x = Math.max(0, Math.round(x0)); j.y = Math.max(0, Math.round(y0));
+    j.w = Math.min(j.width - j.x, Math.round(x1 - x0)); j.h = Math.min(j.height - j.y, Math.round(y1 - y0));
+    j.ai = true;
+    log(`Webkamera: AI ramkasi ${j.x},${j.y} ${j.w}x${j.h} (piksel usuli: ${before})`);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }
 
 module.exports = { alignTokens, mergeForced, geminiByRanges, geminiSubtitles, translateWords, detectFacecam, SAFE, transcribe, buildAss, phrases, fontFamily };

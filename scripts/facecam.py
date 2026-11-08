@@ -15,6 +15,8 @@ a = ap.parse_args()
 cap = cv2.VideoCapture(a.video)
 W, H = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 n = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 1
+FPS = cap.get(cv2.CAP_PROP_FPS) or 30
+frame_no = {}
 cascades = [cv2.CascadeClassifier(cv2.data.haarcascades + f) for f in
             ("haarcascade_frontalface_default.xml", "haarcascade_frontalface_alt2.xml")]
 
@@ -27,7 +29,8 @@ c_sum = None  # mean colour: a drawn border keeps the same strong colour in ever
 gx_sum = gy_sum = None  # mean |gradient|: where webcam meets gameplay the picture "jumps" at the same place in every frame
 ES = 0.5         # edge map scale
 for k in range(a.samples):
-    cap.set(cv2.CAP_PROP_POS_FRAMES, int(n * (0.04 + 0.92 * k / max(1, a.samples - 1))))
+    frame_no[k] = int(n * (0.04 + 0.92 * k / max(1, a.samples - 1)))
+    cap.set(cv2.CAP_PROP_POS_FRAMES, frame_no[k])
     ok, frame = cap.read()
     if not ok:
         continue
@@ -181,4 +184,4 @@ if not refined[3] and H - (y + bh) < snap * H: bh = H - y
 x, y = max(0, x), max(0, y)
 bw, bh = min(bw, W - x), min(bh, H - y)
 out({"found": True, "x": int(x), "y": int(y), "w": int(bw), "h": int(bh), "face": [int(fx), int(fy), int(fw), int(fh)],
-     "border": refined, "hits": best_hits, "samples": used, "width": W, "height": H})
+     "border": refined, "times": [round(frame_no[k] / FPS, 2) for k in sorted({g[0] for g in cl})], "lines": [L, R, T, B] if edge_sum is not None else [], "hits": best_hits, "samples": used, "width": W, "height": H})
