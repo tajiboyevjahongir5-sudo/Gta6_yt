@@ -203,4 +203,4 @@ async function analytics(params) {
   return (j.rows || []).map((row) => Object.fromEntries(row.map((v, i) => [cols[i], v])));
 }
 
-module.exports = { commentThreads, replyComment, analytics, hasScope, channelVideos, setCreds, setupInfo, canBrand, applyBranding, configured, connected, authUrl, checkState, finishAuth, disconnect, channelInfo, upload, setThumbnail, videoStats, fitTags };
+module.exports = { apiGet: (q) => api(q), commentThreads, replyComment, analytics, hasScope, channelVideos, setCreds, setupInfo, canBrand, applyBranding, configured, connected, authUrl, checkState, finishAuth, disconnect, channelInfo, upload, setThumbnail, videoStats, fitTags };

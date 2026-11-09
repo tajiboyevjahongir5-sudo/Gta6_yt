@@ -115,6 +115,7 @@ const subs = require('./subtitles');
 const ai = require('./ai');
 const yt = require('./youtube');
 const tg = require('./telegram');
+const style = require('./style');
 
 // ---------------- jobs ----------------
 function normalizeVideoUrl(url) { return String(url).trim(); }
@@ -369,13 +370,24 @@ async function processJob(job) {
     const isYT = /youtube\.com|youtu\.be/.test(job.url) && !!job.video_id;
     const youtube = isYT && info.duration <= settings.aiWatchMaxMinutes * 60
       ? { url: `https://www.youtube.com/watch?v=${job.video_id}`, fps: info.duration <= 3600 ? 0.5 : 0.2 } : null;
-    aiRes = await ai.rankAndDescribe({ candidates: cands, source: job, settings, context: { meta, transcript, overview, youtube } });
+    // a niche style guide learned earlier for this kind of video (same game/topic in the title) guides the moment choice
+    const g0 = settings.learnStyle ? style.guess([meta.title, job.title, settings.game, ...(meta.tags || [])].filter(Boolean).join(' ')) : null;
+    aiRes = await ai.rankAndDescribe({ candidates: cands, source: job, settings, context: { meta, transcript, overview, youtube, styleRules: style.rulesText(g0) } });
     if (aiRes) setJob(job.id, { step: `AI: ${aiRes.provider === 'gemini' ? 'Gemini' : 'Claude'}` });
     candidates.length = cands.length;
   }
   const tpl = ai.templateMeta({ source: job, settings, count: settings.highlightCount, meta });
   const video = aiRes?.video || tpl.video;
   setJob(job.id, { meta: { ...meta, subject: video.subject, summary: video.summary } });
+  // editor skill: how the viral Shorts of this niche are edited (learned once a week per niche) -> this job's editing
+  if (settings.learnStyle && settings.makeShorts && video.subject) {
+    setJob(job.id, { step: 'Mashhur Shorts montaji o\'rganilmoqda' });
+    try {
+      const g = await style.learn(video.subject);
+      const o = style.overrides(g);
+      if (Object.keys(o).length) { Object.assign(settings, o); log(`#${job.id}: "${g.niche}" uslubi qo'llandi — ${JSON.stringify(o)}`); }
+    } catch (e) { log('Uslub qo\'llanmadi: ' + e.message.slice(0, 160), 'warn'); }
+  }
   const hashtags = (video.hashtags || []).map((h) => '#' + String(h).replace(/[^\p{L}\p{N}_]/gu, '')).filter((h) => h.length > 1);
   const { picked } = chooseMoments(candidates, aiRes, settings);
   const long = aiRes?.long || tpl.long;

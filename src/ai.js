@@ -24,7 +24,7 @@ async function callClaude({ parts, schema, effort = 'medium', maxTokens = 10000 
     model: AI_MODEL, max_tokens: maxTokens,
     betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default',
     output_config: { effort, format: { type: 'json_schema', schema } },
-    messages: [{ role: 'user', content: parts.filter((p) => !p.audio).map((p) => (p.image
+    messages: [{ role: 'user', content: parts.filter((p) => !p.audio && !p.youtube).map((p) => (p.image
       ? { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: b64(p.image) } } : { type: 'text', text: p.text })) }],
   });
   if (res.stop_reason === 'refusal') throw new Error('Claude so\'rovni rad etdi');
@@ -52,7 +52,8 @@ let geminiWorking = null;
 async function callGemini({ parts, schema, youtube, quality }) {
   const key = geminiKey(); if (!key) throw new Error('Gemini kaliti yo\'q');
   const gparts = parts.map((p) => (p.image ? { inlineData: { mimeType: 'image/jpeg', data: b64(p.image) } }
-    : p.audio ? { inlineData: { mimeType: p.mime || 'audio/wav', data: b64(p.audio) } } : { text: p.text }));
+    : p.audio ? { inlineData: { mimeType: p.mime || 'audio/wav', data: b64(p.audio) } }
+    : p.youtube ? { fileData: { fileUri: p.youtube } } : { text: p.text }));
   const build = (withVideo) => ({
     contents: [{ role: 'user', parts: withVideo && youtube
       ? [{ fileData: { fileUri: youtube.url }, videoMetadata: { fps: youtube.fps || 0.5 } }, ...gparts] : gparts }],
@@ -195,6 +196,7 @@ async function rankAndDescribe({ candidates, source, settings, context = {} }) {
     `Everything must describe what is actually in this video; use real names (game, people, teams) when the evidence shows them.\n` +
     `Write in ${LANG[settings.language] || settings.language}. Channel name: ${settings.channelName}. ` +
     `Do not mock the original creator, do not invent events, do not use clickbait the video doesn't deliver.` +
+    (context.styleRules?.length ? `\n\nHOW THE VIRAL SHORTS OF THIS NICHE ARE MADE (studied from the most-viewed Shorts — prefer moments and titles like these):\n- ${context.styleRules.join('\n- ')}` : '') +
     (() => { const L = require('./growth').lessons(); return L.length ? `\n\nLESSONS FROM THIS CHANNEL'S OWN RESULTS (daily analysis of its uploads — follow them when choosing moments and writing titles):\n- ${L.join('\n- ')}` : ''; })() });
   const r = await generateJSON({ parts, schema: SCHEMA, youtube: context.youtube });
   if (!r) return null;

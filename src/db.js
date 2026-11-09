@@ -58,6 +58,7 @@ const DEFAULTS = {
   accent: '#FFD400',           // thumbnail text colour
   keepSource: false,           // delete downloaded stream after rendering
   useAI: true,
+  learnStyle: true,            // study the most-viewed Shorts of each niche and edit like them (Gemini watches them)
   aiListen: true,              // the AI listens to the whole audio to find laughs, hype, jokes (Gemini)
   camReactions: true,          // streamer webcam movement raises moments with a strong reaction
   hook: true,                  // Shorts open on their climax for ~1.3 s, then the story from the start
