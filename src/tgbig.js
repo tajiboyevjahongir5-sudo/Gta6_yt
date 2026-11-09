@@ -41,11 +41,25 @@ async function getDoc(c, messageId) {
   if (!doc) throw new Error('Xabar topilmadi (MTProto)');
   return doc;
 }
-async function download(messageId, dest, onProgress) {
+// one big download at a time: two parallel 1 GB downloads make Telegram's file servers time out more often
+let queue = Promise.resolve();
+function download(messageId, dest, onProgress) {
+  const run = queue.then(() => downloadOne(messageId, dest, onProgress));
+  queue = run.catch(() => {});
+  return run;
+}
+async function reconnect() {
+  try { const c = await clientP; await c?.disconnect(); } catch (e) {}
+  clientP = null;
+  return client();
+}
+async function downloadOne(messageId, dest, onProgress) {
   const { Api } = require('telegram');
   const bigInt = require('big-integer');
-  const c = await client();
-  const PIECE = 512 * 1024;
+  let c = await client();
+  // small pieces: "-503 Timeout" / "-500 No workers running" come from Telegram's media servers under load and hit
+  // big requests first; every piece that arrives is kept, so a failure costs at most one piece
+  const PIECE = 128 * 1024, MAX_FAILS = 30;
   let doc = await getDoc(c, messageId);
   const total = Number(doc.size);
   fs.writeFileSync(dest, '');
@@ -55,7 +69,7 @@ async function download(messageId, dest, onProgress) {
       const loc = new Api.InputDocumentFileLocation({ id: doc.id, accessHash: doc.accessHash, fileReference: doc.fileReference, thumbSize: '' });
       const fd = fs.openSync(dest, 'a');
       try {
-        for await (const chunk of c.iterDownload({ file: loc, offset: bigInt(got), requestSize: PIECE, dcId: doc.dcId, fileSize: bigInt(total) })) {
+        for await (const chunk of c.iterDownload({ file: loc, offset: bigInt(got), requestSize: PIECE, chunkSize: PIECE, dcId: doc.dcId, fileSize: bigInt(total) })) {
           fs.writeSync(fd, chunk); got += chunk.length; fails = 0;
           const p = Math.floor((got / total) * 100);
           if (onProgress && p >= last + 10) { last = p - (p % 10); onProgress(last); }
@@ -64,11 +78,12 @@ async function download(messageId, dest, onProgress) {
       } finally { fs.closeSync(fd); }
       if (got < total) throw new Error('Yuklash kutilmaganda to\'xtadi');
     } catch (e) {
-      if (++fails > 12) throw new Error(`${e.message} (${Math.round(got / 1048576)}/${Math.round(total / 1048576)} MB yuklangan edi)`);
+      if (++fails > MAX_FAILS) throw new Error(`${e.message} (${Math.round(got / 1048576)}/${Math.round(total / 1048576)} MB yuklangan edi)`);
       log(`Katta video: ${Math.round(got / 1048576)} MB da uzildi (${String(e.message).slice(0, 80)}), ${fails}-qayta urinish`, 'warn');
-      // keep only whole pieces (the offset must be a multiple of the piece size), wait, refresh the file reference
       got = Math.floor(got / PIECE) * PIECE; fs.truncateSync(dest, got);
-      await new Promise((ok) => setTimeout(ok, Math.min(60000, 3000 * fails)));
+      await new Promise((ok) => setTimeout(ok, Math.min(60000, 2000 * fails)));
+      // every 3rd failure in a row: a fresh connection (the link to the file's data centre may be stuck)
+      if (fails % 3 === 0) { try { c = await reconnect(); } catch (er) { log('MTProto qayta ulanmadi: ' + er.message, 'warn'); } }
       try { doc = await getDoc(c, messageId); } catch (er) { /* keep the old reference */ }
     }
   }
