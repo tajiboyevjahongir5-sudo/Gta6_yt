@@ -270,6 +270,14 @@ async function api(req, res, url) {
     setSecret('gemini_key', key || null); log(key ? 'Gemini kaliti saqlandi' : 'Gemini kaliti o\'chirildi');
     return send(res, 200, { providers: ai.providers() });
   }
+  if (p === '/api/proxy' && m === 'GET') { const u = pipeline.proxyUrl(); return send(res, 200, { has: !!u, masked: u ? u.replace(/\/\/([^:@/]+):[^@/]*@/, '//$1:•••@') : '' }); }
+  if (p === '/api/proxy' && m === 'POST') {
+    let u; try { u = pipeline.normalizeProxy(b.url); } catch (e) { return send(res, 400, { error: e.message }); }
+    if (!u) return send(res, 400, { error: 'Proxy manzilini kiriting' });
+    try { const t = await pipeline.testProxy(u); pipeline.setProxy(u); return send(res, 200, { ok: true, ...t }); }
+    catch (e) { return send(res, 400, { error: e.message }); }
+  }
+  if (p === '/api/proxy' && m === 'DELETE') { pipeline.setProxy(''); return send(res, 200, { has: false }); }
   if (p === '/api/cookies' && m === 'GET') {
     const f = pipeline.COOKIES; const has = fs.existsSync(f);
     return send(res, 200, { has, updated: has ? fs.statSync(f).mtimeMs : null });

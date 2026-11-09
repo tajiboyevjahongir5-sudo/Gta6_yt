@@ -10,9 +10,34 @@ const COOKIES = path.join(DATA_DIR, 'cookies.txt');
 const COOKIES_RUN = path.join(DATA_DIR, 'cookies.run.txt');
 const LOGIN_COOKIES = ['SID', '__Secure-1PSID', '__Secure-3PSID', 'LOGIN_INFO', 'SAPISID'];
 const hasLogin = (text) => { const names = new Set(String(text).split('\n').map((l) => l.split('\t')[5])); return LOGIN_COOKIES.some((n) => names.has(n)); };
+// proxy for YouTube (Web App → Sozlamalar → YouTube proxy, or YTDLP_PROXY env). YouTube blocks data-centre IPs
+// (Railway, AWS…) with "Sign in to confirm you're not a bot"; downloader bots get past it with residential proxies.
+const proxyUrl = () => require('./db').getSecret('ytProxy') || process.env.YTDLP_PROXY || '';
+function normalizeProxy(u) {
+  u = String(u || '').trim();
+  if (!u) return '';
+  // host:port:user:pass (how many shops hand them out) -> http://user:pass@host:port
+  const parts = u.split(':');
+  if (!/^\w+:\/\//.test(u) && parts.length === 4) u = `http://${parts[2]}:${parts[3]}@${parts[0]}:${parts[1]}`;
+  else if (!/^\w+:\/\//.test(u)) u = 'http://' + u;
+  const x = new URL(u);
+  if (!/^(https?|socks5h?|socks4a?):$/.test(x.protocol) || !x.hostname || !x.port) throw new Error('Proxy formati: http://user:parol@host:port yoki host:port:user:parol');
+  return u;
+}
+// a proxy works if YouTube gives a public video's formats through it without the bot check
+async function testProxy(u) {
+  const t0 = Date.now();
+  const { out } = await run(YTDLP, ['--proxy', u, '-J', '--skip-download', '--no-warnings', '--socket-timeout', '20', 'https://www.youtube.com/watch?v=jNQXAC9IVRw'], { timeoutMs: 90000 })
+    .catch((e) => { throw new Error(/not a bot|Sign in/i.test(e.message) ? 'Bu proxy\'ni ham YouTube bloklayapti (data-markaz IP). Rezidensial/mobil proxy kerak'
+      : /407|Proxy Authentication/i.test(e.message) ? 'Proxy login/parol noto\'g\'ri' : /timed out|Unable to connect|Connection refused|Tunnel/i.test(e.message) ? 'Proxy\'ga ulanib bo\'lmadi' : e.message.slice(-200)); });
+  const j = JSON.parse(out);
+  const best = Math.max(0, ...(j.formats || []).map((f) => f.height || 0));
+  return { ok: true, ms: Date.now() - t0, best };
+}
+function setProxy(u) { require('./db').setSecret('ytProxy', u || null); log(u ? 'YouTube proxy saqlandi' : 'YouTube proxy o\'chirildi'); }
 function ytArgs(useCookies = true) {
   // optional proxy (a residential proxy gets past YouTube's block on data-centre IPs), e.g. http://user:pass@host:port
-  const proxy = process.env.YTDLP_PROXY ? ['--proxy', process.env.YTDLP_PROXY] : [];
+  const px = proxyUrl(); const proxy = px ? ['--proxy', px] : [];
   if (!useCookies || !fs.existsSync(COOKIES)) return proxy;
   fs.copyFileSync(COOKIES, COOKIES_RUN);
   return [...proxy, '--cookies', COOKIES_RUN];
@@ -76,8 +101,8 @@ function explainYtdlp(e) {
   const wrap = (txt) => new Error(txt + (why ? ` (YouTube: ${why})` : ''));
   if (/confirm your age|age-restricted|Sign in to confirm|not a bot|cookies/i.test(m))
     return wrap(fs.existsSync(COOKIES)
-      ? 'YouTube bu cookies\'ni endi qabul qilmayapti (Google sessiyani bekor qilgan — server IP\'si o\'zgarganda shunday bo\'ladi). Yangi cookies yuboring yoki videoni 📁 fayl qilib yuklang'
-      : 'YouTube serverni bloklayapti (bot tekshiruvi yoki 18+): cookies.txt faylini botga yuboring yoki Sozlamalar → 🍪 YouTube cookies, keyin "Qayta urinish"');
+      ? 'YouTube bu cookies\'ni endi qabul qilmayapti (Google sessiyani bekor qilgan — server IP\'si o\'zgarganda shunday bo\'ladi). Doimiy yechim: Sozlamalar → YouTube proxy. Hozircha: yangi cookies yuboring yoki videoni downloader botdan shu botga forward qiling'
+      : 'YouTube serverni bloklayapti (bot tekshiruvi): doimiy yechim — Sozlamalar → YouTube proxy. Yoki cookies.txt yuboring, yoki videoni downloader botdan shu botga forward qiling');
   if (/HTTP Error 403|Forbidden/i.test(m)) return wrap('YouTube yuqori sifatdagi videoni berishni rad etdi (403), barcha HD usullar sinaldi. Variantlar: 10-20 daqiqadan keyin "Qayta urinish"; cookies\'ni yangilash; videoni 📁 fayl qilib yuklash; yoki Sozlamalar → "Past sifatga ruxsat" (360p)');
   if (/Private video|members-only|Join this channel/i.test(m)) return wrap('Video yopiq yoki faqat a\'zolar uchun');
   if (/is not available|Video unavailable/i.test(m)) return wrap('Video mavjud emas yoki o\'chirilgan');
@@ -684,4 +709,4 @@ function start() {
   require('./growth').start(every);
 }
 
-module.exports = { redoJob, removeKeptSource, refreshChannel, channelRefreshState, COOKIES, UPLOAD_DIR, saveCookies, start, addJob, addSource, checkSources, scheduleClip, refreshStats, announceClip, chooseMoments, normalizeSourceUrl, kick };
+module.exports = { proxyUrl, normalizeProxy, testProxy, setProxy, redoJob, removeKeptSource, refreshChannel, channelRefreshState, COOKIES, UPLOAD_DIR, saveCookies, start, addJob, addSource, checkSources, scheduleClip, refreshStats, announceClip, chooseMoments, normalizeSourceUrl, kick };

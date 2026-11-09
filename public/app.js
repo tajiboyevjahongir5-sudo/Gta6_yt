@@ -400,6 +400,7 @@ async function settings() {
         ${o.youtube.configured ? '<p class="small" style="margin:8px 0 0"><a href="#" id="ytsetup" style="color:var(--muted)">Google kalitlarini o\'zgartirish</a></p>' : ''}`}</div>
     ${o.youtube.connected && !o.youtube.canBrand ? '<div class="warnbox">Brendni kanalga o\'rnatish uchun kanalni qayta ulang (yangi ruxsat kerak). <a href="#" id="reconn" style="color:inherit">Qayta ulash</a></div>' : ''}
     <div class="card"><div class="row">${appi('spark', 'linear-gradient(160deg,#c77dff,#7b2ff7)')}<div class="grow"><b>Kanal brendi</b><div class="muted small">Nom, username, tavsif, banner va logo</div></div><button class="btn sm" id="brandBtn">Ochish</button></div></div>
+    <div class="card"><div class="row">${appi('sources', 'linear-gradient(160deg,#64d2ff,#0a84ff)')}<div class="grow"><b>YouTube proxy</b><div class="muted small" id="pxState">…</div></div><button class="btn sm" id="pxBtn">Sozlash</button></div></div>
     <div class="card"><div class="row">${appi('key', 'linear-gradient(160deg,#ffb340,#ff7a00)')}<div class="grow"><b>YouTube cookies</b><div class="muted small" id="ckState">…</div></div><button class="btn sm" id="ckBtn">Sozlash</button></div></div>
     <h2>Nashr qilish</h2>
     <div class="card">
@@ -478,6 +479,8 @@ async function settings() {
     e.target.disabled = true; try { await api('/api/ai/gemini', { method: 'POST', body: { key } }); haptic('medium'); toast('✅ Gemini ulandi'); settings(); } catch (er) { toast(er.message); e.target.disabled = false; } };
   api('/api/cookies').then((c) => { if ($('#ckState')) $('#ckState').textContent = c.has ? `✅ Yuklangan (${new Date(c.updated).toLocaleDateString('uz-UZ')})` : '18+ va "bot emasman" tekshiruvli videolar uchun kerak'; });
   if ($('#ckBtn')) $('#ckBtn').onclick = openCookies;
+  api('/api/proxy').then((x) => { if ($('#pxState')) $('#pxState').textContent = x.has ? '✅ Ulangan: ' + x.masked : 'Havoladan yuklashda "bot emasman" xatosining doimiy yechimi'; });
+  if ($('#pxBtn')) $('#pxBtn').onclick = openProxy;
   api('/api/subscribe-gs').then((g) => { if (!$('#gsState')) return; if (g.has) { $('#gsState').textContent = '✅ Sizning green screen videongiz yuklangan'; $('#gsDel').classList.remove('hidden'); } });
   $('#gsFile').onchange = (e) => { const f = e.target.files[0]; if (!f) return; toast('Yuklanmoqda…');
     const x = new XMLHttpRequest(); x.open('PUT', '/api/subscribe-gs'); x.setRequestHeader('authorization', 'Bearer ' + token);
@@ -571,6 +574,25 @@ async function openBrand() {
   draw(); $('#sheet').classList.remove('hidden');
 }
 
+function openProxy() {
+  $('#sheetBody').innerHTML = `<div class="row" style="margin-bottom:6px"><b class="grow">YouTube proxy</b>${xBtn}</div>
+    <p class="small muted">YouTube Railway kabi serverlarning IP manzillarini "bot" deb bloklaydi — shuning uchun havoladan yuklashda "Sign in to confirm you're not a bot" chiqadi. Downloader botlar buni <b>rezidensial proxy</b> (oddiy uy internetiga o'xshagan IP) orqali aylanib o'tadi. Shu yerga proxy qo'ysangiz, bot ham shunday ishlaydi va cookies kerak bo'lmaydi.</p>
+    <div class="card small"><b>Qanday olinadi:</b>
+      <ol style="padding-left:18px;margin:6px 0" class="muted">
+        <li>Proxy sotuvchi saytdan <b>rezidensial (residential) yoki ISP/static residential</b> proxy oling. Oddiy "datacenter" proxy ishlamaydi</li>
+        <li>Uzun streamlar ko'p trafik oladi (1 soat 1080p ≈ 1–2 GB): GB bo'yicha emas, <b>cheksiz trafikli static/ISP</b> proxy arzonroq tushadi</li>
+        <li>Bergan manzilni shu yerga qo'ying: <code>http://login:parol@host:port</code> yoki <code>host:port:login:parol</code></li></ol></div>
+    <label class="f">Proxy</label><input type="text" id="pxUrl" placeholder="http://login:parol@host:port" autocomplete="off" autocapitalize="off" spellcheck="false">
+    <div class="row" style="margin-top:10px"><button class="btn primary grow" id="pxSave">Tekshirish va saqlash</button><button class="btn danger" id="pxDel">O'chirish</button></div>
+    <p class="small muted">Saqlashdan oldin YouTube'ga shu proxy orqali haqiqiy so'rov yuborib tekshiriladi.</p>`;
+  $('#sheet').classList.remove('hidden'); $('#x').onclick = closeSheet;
+  $('#pxSave').onclick = async (e) => { const url = $('#pxUrl').value.trim(); if (!url) return toast('Proxy manzilini kiriting');
+    e.target.disabled = true; e.target.textContent = 'YouTube orqali tekshirilmoqda…';
+    try { const r = await api('/api/proxy', { method: 'POST', body: { url }, timeout: 120000 }); haptic('medium');
+      toast(`✅ Ishlaydi (${(r.ms / 1000).toFixed(1)} s, ${r.best}p gacha). Xato bergan videoni "Qayta urinish" qiling`); closeSheet(); settings(); }
+    catch (er) { toast(er.message); e.target.disabled = false; e.target.textContent = 'Tekshirish va saqlash'; } };
+  $('#pxDel').onclick = async () => { await api('/api/proxy', { method: 'DELETE' }); toast('O\'chirildi'); closeSheet(); settings(); };
+}
 function openCookies() {
   $('#sheetBody').innerHTML = `<div class="row" style="margin-bottom:6px"><b class="grow">YouTube cookies</b>${xBtn}</div>
     <p class="small muted">YouTube 18+ videolarni va serverdan kelgan so'rovlarni faqat akkauntga kirgan holda beradi. Cookies — sizning YouTube'ga kirganingizni bildiruvchi fayl.</p>
