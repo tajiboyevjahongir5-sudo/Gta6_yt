@@ -12,6 +12,10 @@ for (const ev of ['gesturestart', 'gesturechange']) document.addEventListener(ev
 document.addEventListener('touchmove', (e) => { if (e.touches.length > 1) e.preventDefault(); }, { passive: false });
 let lastTap = 0; document.addEventListener('touchend', (e) => { const n = Date.now(); if (n - lastTap < 300 && !e.target.closest('input,textarea,select,video')) e.preventDefault(); lastTap = n; }, { passive: false });
 const $ = (s, r = document) => r.querySelector(s);
+// fixed app shell: the header never moves, only the page under it scrolls (no iOS rubber-band of the whole screen)
+function fitShell() { const h = document.querySelector('.top'); if (h) document.documentElement.style.setProperty('--topH', h.offsetHeight + 'px'); }
+window.addEventListener('resize', fitShell); tg?.onEvent?.('safeAreaChanged', fitShell); tg?.onEvent?.('contentSafeAreaChanged', fitShell); tg?.onEvent?.('fullscreenChanged', fitShell);
+document.addEventListener('DOMContentLoaded', fitShell); setTimeout(fitShell, 0); setTimeout(fitShell, 600);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const nf = new Intl.NumberFormat('uz-UZ');
 const num = (n) => (n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1e4 ? Math.round(n / 1e3) + 'K' : nf.format(n || 0));
@@ -70,7 +74,7 @@ const here = (p) => page === p;
 function go(p) {
   page = p; clearInterval(timer); closeSheet();
   document.querySelectorAll('.tabs button').forEach((b) => b.classList.toggle('on', b.dataset.page === p));
-  window.scrollTo(0, 0);
+  $('#view').scrollTop = 0;
   $('#view').innerHTML = '<div class="empty"><span class="spin"></span></div>';
   pages[p]().catch((e) => { if (here(p) && !/Sessiya|Kirish|Ruxsat/.test(e.message)) $('#view').innerHTML = `<div class="empty">⚠️ ${esc(e.message)}<br><br><button class="btn sm" onclick="go('${p}')">Qayta urinish</button></div>`; });
 }
@@ -359,7 +363,7 @@ async function stats(silent) {
   if (silent && sig === stats.sig) { const u = $('#upd'); if (u && s.refresh.at) u.textContent = 'yangilandi ' + ago2(s.refresh.at); return; }
   stats.sig = sig;
   const keep = silent ? { growth: $('#growth'), styles: $('#styles') } : {};
-  const scrollY = window.scrollY;
+  const scrollY = $('#view').scrollTop;
   $('#view').innerHTML = `
     <div class="row"><h2 class="grow">Statistika</h2><span class="small muted" id="upd">${s.refresh.at ? 'yangilandi ' + ago2(s.refresh.at) : ''}</span><button class="btn sm" id="refresh">↻</button></div>
     ${!s.connected ? '<div class="warnbox">YouTube kanal ulanmagan — Sozlamalarda ulang</div>' : ''}
@@ -389,7 +393,7 @@ async function stats(silent) {
       : `<div class="muted small">${s.connected ? (s.refresh.running ? 'YouTube\'dan olinmoqda…' : 'Kanalda hali video yo\'q') : 'Kanal ulanmagan'}</div>`}</div>`;
   const kept = {};
   for (const [k, el] of Object.entries(keep)) { const slot = $('#' + k); if (el && slot && el.childNodes.length) { slot.replaceWith(el); kept[k] = true; } }
-  if (silent) window.scrollTo(0, scrollY);
+  if (silent) $('#view').scrollTop = scrollY;
   if (growthHtml && !kept.growth) bindGrowth();
   if (!silent || !kept.styles) api('/api/styles').then((list) => { if (!here('stats') || !$('#styles')) return; $('#styles').innerHTML = stylesCard(list); bindStyles(); }).catch(() => {});
   if (!silent || !growthHtml || !kept.growth) api('/api/growth', { timeout: 60000 }).then((g) => { if (!here('stats') || !$('#growth')) return; growthHtml = growthCard(g); $('#growth').innerHTML = growthHtml; bindGrowth(); }).catch(() => {});
