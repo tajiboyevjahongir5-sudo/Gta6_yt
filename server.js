@@ -355,10 +355,14 @@ const server = http.createServer(async (req, res) => {
       return res.end(`<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><body style="margin:0;font:17px/1.5 system-ui;background:#0d0f14;color:#fff;min-height:90vh;display:flex;align-items:center;justify-content:center;padding:24px;box-sizing:border-box;text-align:center;overflow-wrap:anywhere"><div style="max-width:520px">${msg}<p style="opacity:.6">Bu oynani yopib, Telegramga qayting.</p></div>`);
     }
     let mm;
-    if ((mm = url.pathname.match(/^\/media\/clip\/(\d+)\/(video|thumb)$/))) {
+    if ((mm = url.pathname.match(/^\/media\/clip\/(\d+)\/(video|thumb|preview)$/))) {
       if (!checkToken(url.searchParams.get('t'))) { res.writeHead(401); return res.end(); }
       const c = db.prepare('SELECT file, thumb FROM clips WHERE id = ?').get(+mm[1]);
       if (!c) { res.writeHead(404); return res.end(); }
+      if (mm[2] === 'preview') { // made once on first watch (a few seconds), then served
+        let f = c.file; try { if (c.file && fs.existsSync(c.file)) f = await require('./src/render').makePreview(c.file); } catch (e) { log('Prevyu video yaratilmadi: ' + e.message.slice(0, 160), 'warn'); }
+        return serveFile(req, res, f, 'video/mp4');
+      }
       return serveFile(req, res, mm[2] === 'video' ? c.file : c.thumb);
     }
     if ((mm = url.pathname.match(/^\/media\/brand\/(banner|logo)$/))) {

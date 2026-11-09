@@ -342,4 +342,23 @@ async function makeCompatible(file, force = false) {
   return true;
 }
 
-module.exports = { diagnose, makeCompatible, addHook, renderOutro, facecamCrops, renderCompilation, renderShort, renderThumbnail, grabFrame, fmtTime };
+// light copy for watching in the app on a phone (720p, ~2.5 Mbit/s): the full-quality file stays for YouTube.
+// A 1080p Short at 16 Mbit/s keeps buffering on a weak mobile connection.
+const previewOf = (file) => file.replace(/\.mp4$/i, '') + '.preview.mp4';
+const making = {};
+async function makePreview(file) {
+  const out = previewOf(file);
+  if (fs.existsSync(out) && fs.statSync(out).mtimeMs >= fs.statSync(file).mtimeMs) return out;
+  if (making[out]) return making[out];
+  making[out] = (async () => {
+    const tmp = out + '.tmp.mp4';
+    await run(FFMPEG, ['-y', '-hide_banner', '-loglevel', 'error', '-i', file, '-map', '0:v:0', '-map', '0:a:0?',
+      '-vf', "scale=w='if(gt(iw,ih),min(1280,iw),-2)':h='if(gt(iw,ih),-2,min(1280,ih))'", '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '27', '-maxrate', '2500k', '-bufsize', '5000k',
+      '-profile:v', 'main', '-level:v', '4.0', '-pix_fmt', 'yuv420p', '-r', '30', '-c:a', 'aac', '-b:a', '96k', '-ac', '2', '-movflags', '+faststart', tmp]);
+    fs.renameSync(tmp, out);
+    return out;
+  })().finally(() => { delete making[out]; });
+  return making[out];
+}
+
+module.exports = { previewOf, makePreview, diagnose, makeCompatible, addHook, renderOutro, facecamCrops, renderCompilation, renderShort, renderThumbnail, grabFrame, fmtTime };

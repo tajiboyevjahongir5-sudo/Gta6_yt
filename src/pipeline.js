@@ -461,6 +461,7 @@ async function processJob(job) {
       // last check: every phone must play it (fixes the format if anything is off; logs what was wrong)
       try { const d = await render.diagnose(out); if (d.problems.length) log(`#${job.id}: Shorts #${i + 1} tekshiruvi: ${d.problems.join(', ')}`, 'warn');
         if (await render.makeCompatible(out)) log(`#${job.id}: Shorts #${i + 1} telefonlar uchun qayta kodlandi`); } catch (e) { log('Moslik tekshiruvi: ' + e.message.slice(0, 160), 'warn'); }
+      render.makePreview(out).catch(() => {}); // light copy for watching in the app
       await render.grabFrame(out, hooked ? 0.7 : 1.5, thumb, 540);
       const description = [title, '', creditLine(job), '', ['#shorts', ...hashtags].join(' ')].join('\n');
       const shortDur = s.parts ? s.parts.reduce((t, p) => t + p.end - p.start, 0) : s.end - s.start;
