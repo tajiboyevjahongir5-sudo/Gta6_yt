@@ -332,13 +332,16 @@ function bindStyles() {
     try { await api('/api/styles', { method: 'POST', body: { niche }, timeout: 300000 }); toast("✅ O'rganildi"); const l = await api('/api/styles'); $('#styles').innerHTML = stylesCard(l); bindStyles(); }
     catch (er) { toast(er.message); e.target.disabled = false; e.target.textContent = "O'rganish"; } };
 }
+function reloadGrowth() {
+  api('/api/growth', { timeout: 60000 }).then((g) => { if (!here('stats') || !$('#growth')) return; growthHtml = growthCard(g); $('#growth').innerHTML = growthHtml; bindGrowth(); }).catch(() => {});
+}
 function bindGrowth() {
   if ($('#reconn2')) $('#reconn2').onclick = (e) => { e.preventDefault(); connectYouTube(); };
   if ($('#ganal')) $('#ganal').onclick = async (e) => { e.target.disabled = true; e.target.textContent = 'Tahlil qilinmoqda…';
-    try { const r = await api('/api/growth/analyze', { method: 'POST', timeout: 300000 }); toast(r.skipped ? 'Hali video kam: ' + r.skipped : 'Tahlil tayyor'); growthHtml = ''; stats(true); }
+    try { const r = await api('/api/growth/analyze', { method: 'POST', timeout: 300000 }); toast(r.skipped ? 'Hali video kam: ' + r.skipped : 'Tahlil tayyor'); reloadGrowth(); }
     catch (er) { toast(er.message); e.target.disabled = false; e.target.textContent = 'Hozir tahlil qilish'; } };
   if ($('#greply')) $('#greply').onclick = async (e) => { e.target.disabled = true; e.target.textContent = 'Javob yozilmoqda…';
-    try { const r = await api('/api/growth/reply', { method: 'POST', timeout: 600000 }); toast(r.error === 'scope' ? 'Kanalni qayta ulang' : `${r.replied || 0} ta javob yozildi`); growthHtml = ''; stats(true); }
+    try { const r = await api('/api/growth/reply', { method: 'POST', timeout: 600000 }); toast(r.error === 'scope' ? 'Kanalni qayta ulang' : `${r.replied || 0} ta javob yozildi`); reloadGrowth(); }
     catch (er) { toast(er.message); e.target.disabled = false; e.target.textContent = 'Hozir javob berish'; } };
 }
 const ago2 = (t) => { const sec = Math.round((Date.now() - t) / 1000); return sec < 60 ? `${sec} s oldin` : ago(t); };
@@ -350,6 +353,12 @@ async function stats(silent) {
   const k = Object.fromEntries(s.byKind.map((r) => [r.kind, r]));
   const avg = (r) => (r && r.videos ? Math.round(r.views / r.videos) : 0);
   const ch = s.channel;
+  // live refresh must be invisible: nothing changed -> touch nothing; otherwise keep the AI cards (growth, styles)
+  // as they are (open sections, what you are reading) and only redraw the numbers and lists around them
+  const sig = JSON.stringify({ ...s, refresh: { error: s.refresh.error } });
+  if (silent && sig === stats.sig) { const u = $('#upd'); if (u && s.refresh.at) u.textContent = 'yangilandi ' + ago2(s.refresh.at); return; }
+  stats.sig = sig;
+  const keep = silent ? { growth: $('#growth'), styles: $('#styles') } : {};
   const scrollY = window.scrollY;
   $('#view').innerHTML = `
     <div class="row"><h2 class="grow">Statistika</h2><span class="small muted" id="upd">${s.refresh.at ? 'yangilandi ' + ago2(s.refresh.at) : ''}</span><button class="btn sm" id="refresh">↻</button></div>
@@ -378,10 +387,12 @@ async function stats(silent) {
         <div class="small muted">👁 ${num(v.views)} · 👍 ${num(v.likes)} · 💬 ${num(v.comments)}</div>
         <div class="small muted">${new Date(v.published).toLocaleDateString('uz-UZ')}${v.short ? ' · <span class="pill">Shorts</span>' : ''}${v.lahza ? ' · <span class="pill good">Lahza</span>' : ''}${v.privacy && v.privacy !== 'public' ? ` · <span class="pill warn">${v.privacy === 'private' ? 'yopiq' : 'havola orqali'}</span>` : ''}</div></div></div>`).join('')
       : `<div class="muted small">${s.connected ? (s.refresh.running ? 'YouTube\'dan olinmoqda…' : 'Kanalda hali video yo\'q') : 'Kanal ulanmagan'}</div>`}</div>`;
+  const kept = {};
+  for (const [k, el] of Object.entries(keep)) { const slot = $('#' + k); if (el && slot && el.childNodes.length) { slot.replaceWith(el); kept[k] = true; } }
   if (silent) window.scrollTo(0, scrollY);
-  if (growthHtml) bindGrowth();
-  if (!silent) api('/api/styles').then((list) => { if (!here('stats') || !$('#styles')) return; $('#styles').innerHTML = stylesCard(list); bindStyles(); }).catch(() => {});
-  if (!silent || !growthHtml) api('/api/growth', { timeout: 60000 }).then((g) => { if (!here('stats') || !$('#growth')) return; growthHtml = growthCard(g); $('#growth').innerHTML = growthHtml; bindGrowth(); }).catch(() => {});
+  if (growthHtml && !kept.growth) bindGrowth();
+  if (!silent || !kept.styles) api('/api/styles').then((list) => { if (!here('stats') || !$('#styles')) return; $('#styles').innerHTML = stylesCard(list); bindStyles(); }).catch(() => {});
+  if (!silent || !growthHtml || !kept.growth) api('/api/growth', { timeout: 60000 }).then((g) => { if (!here('stats') || !$('#growth')) return; growthHtml = growthCard(g); $('#growth').innerHTML = growthHtml; bindGrowth(); }).catch(() => {});
   barChart($('#c1'), s.series, 'views', "ko'rish");
   lineChart($('#c2'), s.subs, 'subscribers', 'obunachi');
   document.querySelectorAll('[data-d]').forEach((b) => (b.onclick = () => { statDays = +b.dataset.d; stats(); }));
