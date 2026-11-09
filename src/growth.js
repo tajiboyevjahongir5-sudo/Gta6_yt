@@ -147,7 +147,7 @@ async function analyze() {
     const rep = { ...r.data, at: now, monetization: mon, analytics: !!per.rows, analyticsError: per.error || null, videos: vids.length };
     rep.lessons = (rep.lessons || []).slice(0, 8);
     setSecret('growthReport', rep);
-    if (s.autoTune && rep.idealShortSeconds >= 20 && rep.idealShortSeconds <= 58) setSettings({ shortTarget: Math.round(rep.idealShortSeconds) });
+    if (s.autoTune && rep.idealShortSeconds >= 20 && rep.idealShortSeconds <= 58) setSettings({ shortTarget: Math.max(30, Math.round(rep.idealShortSeconds)) });
     log('Kanal tahlili tayyor: ' + rep.summary.slice(0, 160));
     await tg.notifyAdmins(`📈 <b>Kunlik tahlil</b>\n${tg.escHtml(rep.summary)}\n\n` +
       rep.diagnosis.slice(0, 3).map((d) => `• <b>${tg.escHtml(d.problem)}</b> → ${tg.escHtml(d.fix)}`).join('\n') +

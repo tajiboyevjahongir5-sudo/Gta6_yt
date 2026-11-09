@@ -115,20 +115,22 @@ const downsample = (a, k) => { const step = Math.max(1, Math.ceil(a.length / k))
 // "Story" Short like a human editor makes: take the build-up before the climax (up to ~2.5 min), keep the
 // seconds with action/voice, cut the dead time (jump cuts), always keep the climax and the reaction after it.
 // Returns parts [{start,end}] in source seconds, in order, totalling ~target seconds (or null if too quiet).
-function storyParts(score, peak, duration, { target = 55, lookback = 150, after = 5, core = 9, minPart = 2, pad = 0.4 } = {}) {
+function storyParts(score, peak, duration, { target = 55, lookback = 150, after = 5, core = 9, minPart = 3, pad = 0.4 } = {}) {
   const w0 = Math.max(0, Math.floor(peak - lookback)), w1 = Math.min(Math.floor(duration), Math.ceil(peak + after));
   const coreStart = Math.max(w0, peak - core);
   const sm = (i) => (((score[i - 1] || 0) + 2 * (score[i] || 0) + (score[i + 1] || 0)) / 4);
   const secs = []; for (let i = w0; i < coreStart; i++) secs.push({ i, v: sm(i) });
   const budget = target - (w1 - coreStart);
-  if (budget < 8 || secs.length < 10) return [{ start: Math.max(0, peak - 4), end: Math.min(duration, peak + after + 6) }];
+  // too little build-up to cut: one continuous piece of the target length that ends after the reaction
+  if (budget < 8 || secs.length < 10) return [{ start: +Math.max(0, peak + after - target).toFixed(2), end: +Math.min(duration, peak + after).toFixed(2) }];
   // pick the strongest seconds of the build-up until the budget is filled (in runs, so cuts aren't too choppy)
   const keep = new Uint8Array(w1 + 2);
   for (let i = coreStart; i < w1; i++) keep[i] = 1;
   let used = 0;
   for (const { i } of [...secs].sort((a, b) => b.v - a.v)) {
     if (used >= budget) break;
-    for (let k = i; k < Math.min(coreStart, i + 2); k++) if (!keep[k]) { keep[k] = 1; used++; }
+    // whole sentences / actions, not 2-second crumbs: take 4-second runs so the story stays understandable
+    for (let k = Math.max(w0, i - 1); k < Math.min(coreStart, i + 3); k++) if (!keep[k]) { keep[k] = 1; used++; }
   }
   // seconds -> parts; drop crumbs, bridge tiny gaps
   let parts = []; let cur = null;
@@ -173,4 +175,16 @@ async function camReaction(file, fc, peak, duration) {
   return { reaction: Math.min(3, +best.toFixed(2)), at: t0 + at };
 }
 
-module.exports = { camReaction, storyParts, probe, findHighlights, scoreSeconds, pickSegments };
+// how long the story goes on after the key moment: while the action / talking stays well above the calm level
+// (reaction, aftermath, the punchline), at least 6 s, at most 22 s, stopping at the first 3-second lull
+function storyAfter(score, peak, duration, { min = 6, max = 22 } = {}) {
+  const p = Math.round(peak); const top = Math.max(...score.slice(Math.max(0, p - 2), p + 3), 0.001);
+  const calm = median(score.slice(Math.max(0, p - 120), p + 60));
+  const lvl = calm + (top - calm) * 0.3;
+  let quiet = 0, t = min;
+  for (let i = p + min; i < Math.min(score.length, p + max, Math.floor(duration)); i++) {
+    if ((score[i] || 0) < lvl) { if (++quiet >= 3) break; } else { quiet = 0; t = i - p + 1; }
+  }
+  return Math.min(max, Math.max(min, t));
+}
+module.exports = { storyAfter, camReaction, storyParts, probe, findHighlights, scoreSeconds, pickSegments };

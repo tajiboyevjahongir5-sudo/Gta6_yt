@@ -166,7 +166,8 @@ async function learn(niche, { force = false } = {}) {
 function overrides(g) {
   if (!g) return {};
   const o = {};
-  if (g.avgLength >= 15) o.shortTarget = Math.round(Math.max(20, Math.min(58, g.avgLength)));
+  // never shorter than 30 s: a story needs its build-up, the key moment and what happens after
+  if (g.avgLength >= 15) o.shortTarget = Math.round(Math.max(30, Math.min(58, g.avgLength)));
   o.hook = g.hook === 'climax_first' || g.hook === 'question_or_text';
   o.zoom = g.zoom !== 'none';
   o.memes = !!g.memeText;

@@ -109,7 +109,7 @@ function explainYtdlp(e) {
   return e;
 }
 const { run, sleep, fmtTime, dayKey, TZ_OFFSET } = require('./util');
-const { findHighlights, storyParts, pickSegments, camReaction } = require('./analyze');
+const { findHighlights, storyParts, storyAfter, pickSegments, camReaction } = require('./analyze');
 const render = require('./render');
 const subs = require('./subtitles');
 const ai = require('./ai');
@@ -430,7 +430,14 @@ async function processJob(job) {
       if (settings.storyShorts && info.duration > 150 && score) {
         // story Short: the build-up before the climax with the dead time cut out (jump cuts), ending on the reaction
         // with the subscribe card at the end, keep ~3.5 s more after the climax so the reaction isn't covered
-        const parts = storyParts(score, peak, info.duration, { target: settings.shortTarget || 55, after: settings.outro ? 8.5 : 5 });
+        // the story: from where it starts (setup the AI heard, else up to 2.5 min back) through the key moment and on
+        // to what happens after it (reaction, aftermath) — not just the loud second
+        const target = Math.max(30, settings.shortTarget || 55);
+        const h = m.heard;
+        let after = h && h.end > peak ? Math.min(25, Math.max(6, h.end - peak)) : storyAfter(score, peak, info.duration);
+        after = Math.min(after + (settings.outro ? 3.5 : 0), info.duration - peak);
+        const lookback = h && h.start < peak ? Math.min(150, Math.max(40, peak - h.start + 20)) : 150;
+        const parts = storyParts(score, peak, info.duration, { target, after, lookback });
         const base = parts[0].start;
         const rel = parts.map((p) => ({ start: +(p.start - base).toFixed(2), end: +(p.end - base).toFixed(2) }));
         let acc = 0, peakOut = 0;
