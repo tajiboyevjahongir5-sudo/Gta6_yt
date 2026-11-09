@@ -83,7 +83,7 @@ async function channelInfo(refresh = false) {
   if (!refresh && cached && cached.at > Date.now() - 30 * 60 * 1000) return cached;
   const j = await api('channels?part=snippet,statistics&mine=true');
   const c = j.items?.[0]; if (!c) return null;
-  const info = { id: c.id, title: c.snippet.title, thumb: c.snippet.thumbnails?.default?.url,
+  const info = { id: c.id, title: c.snippet.title, thumb: c.snippet.thumbnails?.medium?.url || c.snippet.thumbnails?.default?.url,
     subscribers: Number(c.statistics.subscriberCount || 0), views: Number(c.statistics.viewCount || 0),
     videos: Number(c.statistics.videoCount || 0), at: Date.now() };
   setSecret('channel', info);
@@ -175,7 +175,7 @@ async function channelVideos(max = 500) {
       views: +(v.statistics.viewCount || 0), likes: +(v.statistics.likeCount || 0), comments: +(v.statistics.commentCount || 0),
       duration: isoSec(v.contentDetails.duration), privacy: v.status?.privacyStatus || '' });
   }
-  const channel = { id: c.id, title: c.snippet.title, thumb: c.snippet.thumbnails?.default?.url, subscribers: +(c.statistics.subscriberCount || 0),
+  const channel = { id: c.id, title: c.snippet.title, thumb: c.snippet.thumbnails?.medium?.url || c.snippet.thumbnails?.default?.url, subscribers: +(c.statistics.subscriberCount || 0),
     views: +(c.statistics.viewCount || 0), videos: +(c.statistics.videoCount || 0), at: Date.now() };
   setSecret('channel', channel);
   return { channel, videos };

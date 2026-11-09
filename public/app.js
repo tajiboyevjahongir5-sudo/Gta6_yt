@@ -22,6 +22,18 @@ const ago = (t) => { const m = Math.round((Date.now() - t) / 60000); return m < 
 function toast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.remove('hidden'); clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.add('hidden'), 2600); }
 const appi = (id, c) => `<span class="appi" style="background:${c}"><svg class="ic"><use href="#i-${id}"/></svg></span>`;
 const xBtn = '<button class="icon glass" id="x" aria-label="Yopish"><svg class="ic" style="width:18px;height:18px"><use href="#i-x"/></svg></button>';
+// top-left logo = the connected YouTube channel's picture (remembered, so it shows at once on the next open)
+function setLogo(url) {
+  const el = document.querySelector('.top .logo'); if (!el) return;
+  if (url) localStorage.setItem('lahza_logo', url); else if (url === '') localStorage.removeItem('lahza_logo');
+  const u = url || localStorage.getItem('lahza_logo');
+  if (!u) { el.classList.remove('img'); el.textContent = 'L'; return; }
+  if (el.dataset.src === u) return;
+  const img = new Image(); img.alt = ''; img.referrerPolicy = 'no-referrer';
+  img.onload = () => { el.textContent = ''; el.appendChild(img); el.classList.add('img'); el.dataset.src = u; };
+  img.src = u;
+}
+setLogo(null);
 const haptic = (k = 'light') => { try { tg?.HapticFeedback?.impactOccurred(k); } catch (e) {} };
 
 // ---------- auth ----------
@@ -74,6 +86,7 @@ async function home() {
   const o = await api('/api/overview');
   if (!here('home')) return;
   $('#chName').textContent = o.channel?.title || 'kanal ulanmagan';
+  setLogo(o.channel?.thumb || (o.channel?.error ? null : ''));
   $('#badgeDrafts').textContent = o.counts.drafts || '';
   const ch = o.channel && !o.channel.error ? o.channel : null;
   const warn = [];
