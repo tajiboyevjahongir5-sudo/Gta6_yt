@@ -187,11 +187,11 @@ async function openClip(id) {
   const editable = !['published', 'uploading'].includes(c.status);
   $('#sheetBody').innerHTML = `
     <div class="row" style="margin-bottom:10px"><b class="grow">${c.kind === 'short' ? 'Shorts' : 'Kompilyatsiya'} • ${dur(c.duration)}</b>${pill(c.status)}${xBtn}</div>
-    ${c.hasFile && c.kind === 'short' ? `<div class="phone"><video src="${media(id, 'video')}" controls playsinline preload="metadata"></video>
+    ${c.hasFile && c.kind === 'short' ? `<div class="phone"><video src="${media(id, 'video')}&v=${Date.now()}" controls playsinline preload="metadata"></video>
       <div class="ui hidden" id="ui"><i class="z top"></i><i class="z right"></i><i class="z bottom"></i>
       <span class="btns">🤍<br>💬<br>🔖<br>↗️<br>🔁</span><span class="desc"><b>@${esc(c.job?.author ? 'kanalingiz' : 'kanal')}</b> <u>Obuna</u><br>${esc(c.title)}</span></div></div>
       <label class="switch" style="border:0"><span class="small">📐 YouTube interfeysini ko'rsatish (qizil = to'sib qoladigan joylar)</span><input type="checkbox" id="uiT"></label>`
-    : c.hasFile ? `<video src="${media(id, 'video')}" controls playsinline preload="metadata" poster="${media(id, 'thumb')}"></video>` : `<img src="${media(id, 'thumb')}" style="width:100%;border-radius:12px">`}
+    : c.hasFile ? `<video src="${media(id, 'video')}&v=${Date.now()}" controls playsinline preload="metadata" poster="${media(id, 'thumb')}"></video>` : `<img src="${media(id, 'thumb')}" style="width:100%;border-radius:12px">`}
     ${c.url ? `<p><a href="${c.url}" target="_blank" style="color:var(--blue)">YouTube'da ochish ↗</a> · 👁 ${num(c.views)} · 👍 ${num(c.likes)} · 💬 ${num(c.comments)}</p>` : ''}
     ${c.hasFile ? `<p class="small"><a href="${media(id, 'video')}" download="lahza_${id}.mp4" style="color:var(--ink2)">⬇️ Videoni yuklab olish</a>${c.kind === 'long' ? ` · <a href="${media(id, 'thumb')}" download="lahza_${id}.jpg" style="color:var(--ink2)">🖼 Prevyu</a>` : ''}</p>` : ''}
     ${c.error ? `<div class="warnbox">${esc(c.error)}</div>` : ''}
@@ -207,6 +207,16 @@ async function openClip(id) {
       <button class="btn" id="now">🚀 Hozir</button>
       ${c.status !== 'rejected' ? '<button class="btn danger" id="no">Rad etish</button>' : ''}</div>
       ${c.status === 'approved' ? `<p class="muted small">Rejada: ${when(c.scheduled_at)}</p>` : ''}` : ''}`;
+  { const v = $('#sheetBody video');
+    // the phone can't play it: say why (missing / broken file) instead of a crossed-out play icon
+    if (v) v.addEventListener('error', async () => {
+      let why = '';
+      try { const r = await fetch(media(id, 'video'), { method: 'HEAD' }); const mb = (+r.headers.get('content-length') || 0) / 1048576;
+        why = r.ok ? `fayl bor (${mb.toFixed(1)} MB), lekin telefon uni ocha olmadi — fayl buzuq bo'lishi mumkin` : `server ${r.status} qaytardi — fayl topilmadi`; } catch (e) { why = 'serverga ulanib bo\'lmadi'; }
+      const box = document.createElement('div'); box.className = 'warnbox'; box.style.marginTop = '8px';
+      box.textContent = `⚠️ Video ochilmadi: ${why}. Navbatda shu videoni "Qayta tayyorlash" qiling.`;
+      (v.closest('.phone') || v).after(box);
+    }); }
   $('#sheet').classList.remove('hidden');
   $('#x').onclick = closeSheet;
   if ($('#uiT')) $('#uiT').onchange = (e) => $('#ui').classList.toggle('hidden', !e.target.checked);

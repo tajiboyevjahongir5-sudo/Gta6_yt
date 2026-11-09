@@ -451,7 +451,13 @@ async function processJob(job) {
         zoom: settings.zoom, endCard: settings.outro ? card : null, meme: settings.memes ? s.meme : '', climaxFull: settings.climaxFull });
       // hook: open on the climax for ~1.3 s, then the story from its start
       let hooked = false;
-      if (settings.hook) { try { hooked = await render.addHook(out, s.peakOut ?? ((s.peak ?? s.start) - s.start), dir); } catch (e) { log('Hook qo\'shilmadi: ' + e.message.slice(0, 160), 'warn'); } }
+      if (settings.hook) {
+        const backup = out + '.nohook.mp4'; fs.copyFileSync(out, backup);
+        try { hooked = await render.addHook(out, s.peakOut ?? ((s.peak ?? s.start) - s.start), dir); } catch (e) { log('Hook qo\'shilmadi: ' + e.message.slice(0, 160), 'warn'); }
+        if (hooked && !(await playable(out))) { fs.copyFileSync(backup, out); hooked = false; log(`#${job.id}: hook'li video buzuq chiqdi, hook'siz varianti olindi`, 'warn'); }
+        fs.rmSync(backup, { force: true });
+      }
+      if (!(await playable(out))) throw new Error(`Shorts #${i + 1} fayli buzuq chiqdi (disk to'lgan bo'lishi mumkin) — "Qayta tayyorlash" ni bosing`);
       await render.grabFrame(out, hooked ? 0.7 : 1.5, thumb, 540);
       const description = [title, '', creditLine(job), '', ['#shorts', ...hashtags].join(' ')].join('\n');
       const shortDur = s.parts ? s.parts.reduce((t, p) => t + p.end - p.start, 0) : s.end - s.start;
@@ -474,6 +480,10 @@ async function processJob(job) {
   for (const id of created) await announceClip(id);
 }
 
+// a rendered file is usable: it opens, has a video stream and a real duration (not a cut-off write, e.g. a full disk)
+async function playable(file) {
+  try { const i = await require('./analyze').probe(file); return i.duration > 2 && i.width > 0; } catch (e) { return false; }
+}
 // Shorts window: start ~4 s before the peak (hook), cut points moved to pauses between sentences so nobody is cut
 // mid-word, end after the sentence that follows the peak. words = absolute times (seconds in the source).
 function shortWindow(seg, words, duration, { before = 4, after = 10, min = 12, max = 45 } = {}) {

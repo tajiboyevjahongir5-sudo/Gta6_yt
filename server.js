@@ -36,14 +36,21 @@ const readBody = (req) => new Promise((resolve) => { let b = ''; req.on('data', 
 
 function serveFile(req, res, file, type) {
   fs.stat(file, (err, st) => {
-    if (err) { res.writeHead(404); return res.end('Not found'); }
+    if (err || !st.size) { res.writeHead(404); return res.end('Not found'); }
     const range = req.headers.range; const ct = type || TYPES[path.extname(file)] || 'application/octet-stream';
-    if (range) { // video seeking in the preview player
-      const [a, b] = range.replace(/bytes=/, '').split('-'); const start = Number(a) || 0; const end = b ? Number(b) : st.size - 1;
-      res.writeHead(206, { 'content-type': ct, 'content-range': `bytes ${start}-${end}/${st.size}`, 'accept-ranges': 'bytes', 'content-length': end - start + 1 });
+    // media files are re-rendered in place ("Qayta tayyorlash", hook): never let a phone mix old cached bytes with new ones
+    const etag = `"${st.size.toString(36)}-${Math.round(st.mtimeMs).toString(36)}"`;
+    const cache = ct.startsWith('text/') ? 'no-cache' : /^(video|image)\//.test(ct) ? 'no-cache' : 'max-age=300';
+    const m = range && range.match(/bytes=(\d*)-(\d*)/);
+    if (m) { // video seeking in the preview player (iOS asks for byte ranges)
+      let start = m[1] === '' ? Math.max(0, st.size - Number(m[2] || 0)) : Number(m[1]);
+      let end = m[1] !== '' && m[2] !== '' ? Math.min(Number(m[2]), st.size - 1) : st.size - 1;
+      if (start >= st.size || start > end) { res.writeHead(416, { 'content-range': `bytes */${st.size}` }); return res.end(); }
+      res.writeHead(206, { 'content-type': ct, 'content-range': `bytes ${start}-${end}/${st.size}`, 'accept-ranges': 'bytes', 'content-length': end - start + 1, etag, 'cache-control': cache });
       return fs.createReadStream(file, { start, end }).pipe(res);
     }
-    res.writeHead(200, { 'content-type': ct, 'content-length': st.size, 'accept-ranges': 'bytes', 'cache-control': ct.startsWith('text/') ? 'no-cache' : 'max-age=300' });
+    res.writeHead(200, { 'content-type': ct, 'content-length': st.size, 'accept-ranges': 'bytes', etag, 'cache-control': cache });
+    if (req.method === 'HEAD') return res.end();
     fs.createReadStream(file).pipe(res);
   });
 }
