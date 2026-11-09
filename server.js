@@ -392,7 +392,7 @@ const botHandlers = {
       const name = `${Date.now()}-${(v.file_name || 'telegram_video').replace(/\.[^.]+$/, '').replace(/[^\w.\- ]+/g, '_').slice(0, 60)}${ext}`;
       const title = (m.caption || v.file_name || 'Telegram video').replace(/\.[^.]+$/, '').slice(0, 90);
       const dest = path.join(pipeline.UPLOAD_DIR, name);
-      tgbig.download(m.message_id, dest, (p) => { if (p % 50 === 0 && p < 100) tg.notifyAdmins(`⬇️ ${mb} MB video: ${p}%`); })
+      tgbig.download(m.message_id, dest, (p) => { if (p % 25 === 0 && p < 100) tg.notifyAdmins(`⬇️ ${mb} MB video: ${p}%`); }, (msg) => tg.notifyAdmins(msg).catch(() => {}))
         .then(() => { const r = pipeline.addJob('upload:' + name, null, { title }); tg.notifyAdmins(`✅ ${mb} MB video yuklandi, navbatga qo'shildi (#${r.id}).`); })
         .catch((e) => { fs.rmSync(dest, { force: true }); log('Katta video yuklanmadi: ' + e.message, 'warn'); tg.notifyAdmins('⚠️ Katta video yuklanmadi: ' + tg.escHtml(e.message)); });
       return `⬇️ ${mb} MB video yuklanmoqda… Tugagach navbatga qo'shaman va xabar beraman.`;

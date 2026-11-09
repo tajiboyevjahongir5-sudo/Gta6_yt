@@ -43,8 +43,8 @@ async function getDoc(c, messageId) {
 }
 // one big download at a time: two parallel 1 GB downloads make Telegram's file servers time out more often
 let queue = Promise.resolve();
-function download(messageId, dest, onProgress) {
-  const run = queue.then(() => downloadOne(messageId, dest, onProgress));
+function download(messageId, dest, onProgress, onIssue) {
+  const run = queue.then(() => downloadOne(messageId, dest, onProgress, onIssue));
   queue = run.catch(() => {});
   return run;
 }
@@ -53,13 +53,13 @@ async function reconnect() {
   clientP = null;
   return client();
 }
-async function downloadOne(messageId, dest, onProgress) {
+async function downloadOne(messageId, dest, onProgress, onIssue) {
   const { Api } = require('telegram');
   const bigInt = require('big-integer');
   let c = await client();
   // small pieces: "-503 Timeout" / "-500 No workers running" come from Telegram's media servers under load and hit
   // big requests first; every piece that arrives is kept, so a failure costs at most one piece
-  const PIECE = 128 * 1024, MAX_FAILS = 30;
+  const PIECE = 128 * 1024, MAX_FAILS = 15;
   let doc = await getDoc(c, messageId);
   const total = Number(doc.size);
   fs.writeFileSync(dest, '');
@@ -80,8 +80,10 @@ async function downloadOne(messageId, dest, onProgress) {
     } catch (e) {
       if (++fails > MAX_FAILS) throw new Error(`${e.message} (${Math.round(got / 1048576)}/${Math.round(total / 1048576)} MB yuklangan edi)`);
       log(`Katta video: ${Math.round(got / 1048576)} MB da uzildi (${String(e.message).slice(0, 80)}), ${fails}-qayta urinish`, 'warn');
+      // tell the owner early (not after half an hour of silent retries) and give the way that always works
+      if (fails === 3 && onIssue) onIssue(`⏳ Telegram fayl serveri javob bermayapti (${String(e.message).slice(0, 60)}). ${Math.round(got / 1048576)}/${Math.round(total / 1048576)} MB yuklandi, qayta urinyapman.\n\nTezroq yo'l: videoni telefon/kompyuterga saqlab, <b>Panel → Asosiy → 📁 Video faylini yuklash</b> orqali yuklang.`);
       got = Math.floor(got / PIECE) * PIECE; fs.truncateSync(dest, got);
-      await new Promise((ok) => setTimeout(ok, Math.min(60000, 2000 * fails)));
+      await new Promise((ok) => setTimeout(ok, Math.min(30000, 2000 * fails)));
       // every 3rd failure in a row: a fresh connection (the link to the file's data centre may be stuck)
       if (fails % 3 === 0) { try { c = await reconnect(); } catch (er) { log('MTProto qayta ulanmadi: ' + er.message, 'warn'); } }
       try { doc = await getDoc(c, messageId); } catch (er) { /* keep the old reference */ }
