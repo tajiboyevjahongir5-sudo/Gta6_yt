@@ -322,7 +322,10 @@ function stylesCard(d) {
       <div class="row" style="margin-top:10px"><input type="text" id="stNiche" placeholder="CS2, Ready or Not… yoki kanal: @username" autocapitalize="off"><button class="btn sm primary" id="stLearn">O'rganish</button></div>
       ${(d.running || []).map((r) => `<div class="row small" style="margin-top:10px"><span class="spin" style="width:16px;height:16px;border-width:2px"></span><span><b>${esc(r.niche)}</b>: ${esc(r.step)}…</span></div>`).join('')}
       ${d.error ? `<div class="warnbox" style="margin-top:10px">${esc(d.error)}</div>` : ''}</div>
-    ${list.map((g) => `<div class="card"><div class="row"><b class="grow">${g.channel ? '📺 ' : ''}${esc(g.niche)}</b><span class="small muted">${ago2(g.at)}</span></div>
+    ${list.length ? `<button class="btn" id="stOpen" style="width:100%;display:flex;align-items:center;justify-content:center;gap:10px">${appi('clips', 'linear-gradient(160deg,#ff6b8b,#ff2d55)')}<span>O'rganilgan montaj uslublari (${list.length})</span></button>` : ''}`;
+}
+// the learned guides themselves open in their own sheet (the Statistics page stays short)
+function styleCards(list) { return list.map((g) => `<div class="card"><div class="row"><b class="grow">${g.channel ? '📺 ' : ''}${esc(g.niche)}</b><span class="small muted">${ago2(g.at)}</span></div>
       <p class="small">${esc(g.summary)}</p>
       <div class="chips">${[`~${Math.round(g.avgLength)} s`, `${Math.round(g.cutsPerMinute)} kesish/daq`, `hook: ${g.hook}`, `subtitr: ${g.subtitleStyle}`, `zoom: ${g.zoom}`, g.memeText ? 'mem-yozuv' : '', g.soundEffects ? 'effektlar' : '', g.analyses ? `${g.analyses.length} ta Shorts ko'rildi` : ''].filter(Boolean).map((c) => `<span>${esc(c)}</span>`).join('')}</div>
       ${g.whyTheyWork?.length ? `<b class="small" style="display:block;margin-top:10px">Nima uchun qiziq</b><ul class="small">${g.whyTheyWork.map((r) => `<li>${esc(r)}</li>`).join('')}</ul>` : ''}
@@ -336,11 +339,18 @@ function stylesCard(d) {
       <details style="margin-top:6px"><summary class="small">Har bir Shorts tahlili</summary>
         ${(g.analyses || []).map((x) => `<div class="small" style="margin:10px 0"><a href="#" data-src="${esc(x.id)}">▶ ${esc(x.title)} (${num(x.views)})</a>
           <div>${esc(x.whatHappens)}</div><div><b>Nega qiziq:</b> ${esc(x.whyInteresting)}</div><div class="muted">Hook: ${esc(x.hook)} · Ovoz: ${esc(x.audio)} · Tuzilishi: ${esc(x.structure)}</div></div>`).join('')
-          || (g.sources || []).map((x) => `<a href="#" data-src="${esc(x.id)}" class="small">▶ ${esc(x.title)} (${num(x.views)})</a>`).join('<br>')}</details></div>`).join('')}`;
+          || (g.sources || []).map((x) => `<a href="#" data-src="${esc(x.id)}" class="small">▶ ${esc(x.title)} (${num(x.views)})</a>`).join('<br>')}</details></div>`).join(''); }
+function openStyles() {
+  const list = lastStyles?.list || [];
+  $('#sheetBody').innerHTML = `<div class="row" style="margin-bottom:10px"><b class="grow">O'rganilgan montaj uslublari</b>${xBtn}</div>` +
+    (list.length ? styleCards(list) : '<div class="muted small">Hali hech narsa o\'rganilmagan.</div>');
+  $('#sheet').classList.remove('hidden'); $('#x').onclick = closeSheet; bindStyleLinks($('#sheetBody'));
 }
+let lastStyles = null;
 let stylePoll = null;
 function loadStyles() {
   return api('/api/styles?v=2').then((d) => {
+    lastStyles = d;
     if (!here('stats') || !$('#styles')) return;
     const open = [...document.querySelectorAll('#styles details')].map((x) => x.open);
     $('#styles').innerHTML = stylesCard(d); bindStyles();
@@ -348,9 +358,12 @@ function loadStyles() {
     clearTimeout(stylePoll); if (d.running?.length) stylePoll = setTimeout(loadStyles, 8000);
   }).catch(() => {});
 }
+function bindStyleLinks(root) {
+  root.querySelectorAll('[data-src]').forEach((a) => (a.onclick = (e) => { e.preventDefault(); ext('https://youtube.com/shorts/' + a.dataset.src); }));
+  root.querySelectorAll('[data-long]').forEach((a) => (a.onclick = (e) => { e.preventDefault(); ext(`https://youtu.be/${a.dataset.long}?t=${a.dataset.t}`); }));
+}
 function bindStyles() {
-  document.querySelectorAll('[data-src]').forEach((a) => (a.onclick = (e) => { e.preventDefault(); ext('https://youtube.com/shorts/' + a.dataset.src); }));
-  document.querySelectorAll('[data-long]').forEach((a) => (a.onclick = (e) => { e.preventDefault(); ext(`https://youtu.be/${a.dataset.long}?t=${a.dataset.t}`); }));
+  if ($('#stOpen')) $('#stOpen').onclick = openStyles;
   if ($('#stLearn')) $('#stLearn').onclick = async (e) => { const niche = $('#stNiche').value.trim(); if (!niche) return toast("Yo'nalishni yozing");
     e.target.disabled = true;
     try { await api('/api/styles', { method: 'POST', body: { niche } }); toast("O'rganish boshlandi — bir necha daqiqa oladi"); loadStyles(); }
