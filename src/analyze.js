@@ -144,4 +144,33 @@ function storyParts(score, peak, duration, { target = 55, lookback = 150, after 
   return parts.map((p) => ({ start: +p.start.toFixed(2), end: +p.end.toFixed(2) }));
 }
 
-module.exports = { storyParts, probe, findHighlights, scoreSeconds, pickSegments };
+// Streamer reaction in the webcam: how much the face/body moves second by second (jumping, laughing, leaning in).
+// Measured only around candidate moments (fast seeks), on a tiny grey copy of the webcam area, 6 frames a second.
+function camMotion(file, fc, t0, dur, fps = 6) {
+  const W = 48, H = 36;
+  return new Promise((resolve) => {
+    const { spawn } = require('child_process');
+    const p = spawn(FFMPEG, ['-hide_banner', '-loglevel', 'error', '-ss', String(Math.max(0, t0)), '-t', String(dur), '-i', file, '-an', '-sn',
+      '-vf', `fps=${fps},crop=${fc.w}:${fc.h}:${fc.x}:${fc.y},scale=${W}:${H},format=gray`, '-f', 'rawvideo', '-'], { stdio: ['ignore', 'pipe', 'ignore'] });
+    const chunks = []; p.stdout.on('data', (d) => chunks.push(d));
+    const done = () => {
+      const buf = Buffer.concat(chunks), n = Math.floor(buf.length / (W * H));
+      const diff = [];
+      for (let f = 1; f < n; f++) { let sum = 0; const a = (f - 1) * W * H, b = f * W * H; for (let k = 0; k < W * H; k++) sum += Math.abs(buf[b + k] - buf[a + k]); diff.push(sum / (W * H)); }
+      const perSec = []; for (let i = 0; i < diff.length; i += fps) perSec.push(Math.max(...diff.slice(i, i + fps)));
+      resolve(perSec);
+    };
+    p.on('close', done); p.on('error', () => resolve([]));
+  });
+}
+// reaction strength 0..3 around a moment: motion peak against the calm level of the same window
+async function camReaction(file, fc, peak, duration) {
+  const t0 = Math.max(0, peak - 15), dur = Math.min(duration - t0, 27);
+  const m = await camMotion(file, fc, t0, dur);
+  if (m.length < 8) return { reaction: 0 };
+  const calm = median(m) + 0.3, mad = Math.max(0.6, median(m.map((v) => Math.abs(v - calm))));
+  let best = 0, at = 0; m.forEach((v, i) => { const z = (v - calm) / (mad * 4); if (z > best) { best = z; at = i; } });
+  return { reaction: Math.min(3, +best.toFixed(2)), at: t0 + at };
+}
+
+module.exports = { camReaction, storyParts, probe, findHighlights, scoreSeconds, pickSegments };

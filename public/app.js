@@ -406,6 +406,9 @@ async function settings() {
       <div class="row"><div class="grow">${inp('clipBefore', 'Lahzadan oldin (s)', 'number')}</div><div class="grow">${inp('clipAfter', 'Lahzadan keyin (s)', 'number')}</div></div>
       ${sw('facecamLayout', 'Webkamera tepada (Shorts)', 'Videoda streamer kamerasi bo\'lsa: tepada kamera, pastda o\'yin. Kamera bo\'lmasa oddiy ko\'rinish')}
       ${sw('effects', 'Ovoz effektlari', 'Whoosh, boom — eng qiziq joylarda')}
+      ${sw('hook', 'Hook: boshida eng qiziq 1 soniya', "Shorts eng qiziq lahzaning 1.3 soniyasi bilan ochiladi, keyin oq chaqnash va voqea boshidan. Tomoshabinni ushlab qoladi")}
+      ${sw('aiListen', 'AI butun ovozni tinglaydi', 'Gemini butun efirni eshitib kulgi, hayajon, hazil va kutilmagan joylarni topadi (jim kulgili joylarni ham)')}
+      ${sw('camReactions', 'Streamer reaksiyasini hisobga olish', 'Webkamerada streamer keskin harakat qilgan (kulgan, sakragan) lahzalar yuqoriroq baholanadi')}
       ${sw('storyShorts', 'Hikoyali Shorts (jump cut)', 'Eng qiziq joygacha bo\'lgan voqea zerikarli joylari kesilib ~55 s ga qisqaradi, eng qiziq joyda o\'yin butun ekranga chiqadi')}
       ${sw('climaxFull', 'Eng qiziq joyda o\'yin butun ekranda', 'Webkamera ~4 s yo\'qoladi, o\'yin butun ekranni egallaydi')}
       ${sw('memes', 'Mem-yozuv eng qiziq joyda', 'AI yozgan qisqa hazil yozuv so\'zma-so\'z chiqadi')}

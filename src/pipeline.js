@@ -2,7 +2,7 @@
 const fs = require('fs');
 const path = require('path');
 const { db, getSettings, log, parseClip, updateRow } = require('./db');
-const { WORK_DIR, OUT_DIR, YTDLP, DATA_DIR } = require('./config');
+const { WORK_DIR, OUT_DIR, YTDLP, DATA_DIR, FFMPEG } = require('./config');
 // YouTube cookies (Netscape cookies.txt) uploaded in the web app: needed for age-restricted videos and when
 // YouTube asks servers to "sign in to confirm you're not a bot"
 const COOKIES = path.join(DATA_DIR, 'cookies.txt');
@@ -84,7 +84,7 @@ function explainYtdlp(e) {
   return e;
 }
 const { run, sleep, fmtTime, dayKey, TZ_OFFSET } = require('./util');
-const { findHighlights, storyParts } = require('./analyze');
+const { findHighlights, storyParts, pickSegments, camReaction } = require('./analyze');
 const render = require('./render');
 const subs = require('./subtitles');
 const ai = require('./ai');
@@ -271,10 +271,54 @@ async function processJob(job) {
   if (source?.credit) job.author = source.credit;
 
   setJob(job.id, { status: 'analyzing', step: 'Qiziq lahzalar qidirilmoqda', progress: 0 });
-  const { info, candidates, score } = await findHighlights(src, { count: settings.highlightCount, before: settings.clipBefore, after: settings.clipAfter },
+  const hl = await findHighlights(src, { count: settings.highlightCount, before: settings.clipBefore, after: settings.clipAfter },
     (p) => setJob(job.id, { progress: p }));
+  const { info, score } = hl; let candidates = hl.candidates;
   setJob(job.id, { duration: info.duration });
+
+  // 1) the AI listens to the whole audio and marks laughs, hype, jokes, surprises (also quiet ones) -> they lift the score
+  if (info.duration > 75 && info.hasAudio && settings.aiListen && settings.useAI && ai.providers().includes('gemini')) {
+    try {
+      setJob(job.id, { step: 'AI butun ovozni tinglamoqda', progress: 0 });
+      const chunks = []; const CH = 2400;
+      for (let off = 0; off < info.duration - 20; off += CH) {
+        const f = path.join(dir, `listen_${off}.ogg`); const d = Math.min(CH, info.duration - off);
+        await run(FFMPEG, ['-y', '-hide_banner', '-loglevel', 'error', '-ss', String(off), '-t', String(d), '-i', src, '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'libopus', '-b:a', '16k', f]);
+        chunks.push({ file: f, offset: off, dur: d });
+      }
+      const heard = await ai.listenMoments(chunks, { title: job.title || meta.title, settings });
+      for (const c of chunks) fs.rmSync(c.file, { force: true });
+      if (heard.length) {
+        for (const h of heard) {
+          const w = (h.intensity / 10) * 2.5, pk = Math.round(h.peak);
+          for (let k = -4; k <= 4; k++) { const i = pk + k; if (i >= 0 && i < score.length) score[i] += w * (1 - Math.abs(k) / 5); }
+        }
+        candidates = pickSegments(score, { count: Math.max(settings.highlightCount * 2, 12), before: settings.clipBefore, after: settings.clipAfter,
+          duration: info.duration, skipStart: Math.min(60, info.duration * 0.05), skipEnd: Math.min(30, info.duration * 0.03) });
+        for (const c of candidates) {
+          const h = heard.filter((x) => Math.abs(x.peak - c.peak) <= 8).sort((a, b) => b.intensity - a.intensity)[0];
+          if (h) { c.heard = h; c.peak = Math.round(h.peak); c.start = Math.max(0, c.peak - settings.clipBefore); c.end = Math.min(info.duration, c.peak + settings.clipAfter); }
+        }
+        log(`#${job.id}: AI ovozda ${heard.length} ta qiziq joy eshitdi (${heard.filter((h) => h.intensity >= 7).length} tasi kuchli)`);
+      }
+    } catch (e) { log('AI tinglash ishlamadi: ' + e.message.slice(0, 200), 'warn'); }
+  }
   if (!candidates.length) throw new Error('Qiziq lahza topilmadi (video juda jim yoki qisqa)');
+
+  // 2) streamer webcam: found once, then how strongly the streamer reacts around each candidate
+  let facecam = null;
+  if (settings.makeShorts && settings.facecamLayout) {
+    setJob(job.id, { step: 'Webkamera qidirilmoqda' });
+    facecam = await subs.detectFacecam(src);
+    if (facecam) log(`#${job.id}: webkamera topildi (${facecam.w}×${facecam.h} @${facecam.x},${facecam.y}, chegara ${JSON.stringify(facecam.border)}, ${facecam.hits}/${facecam.samples} kadrda) — Shorts tepada kamera, pastda o'yin`);
+  }
+  if (facecam && settings.camReactions && info.duration > 75) {
+    setJob(job.id, { step: 'Streamer reaksiyalari o\'lchanmoqda' });
+    for (const c of candidates.slice(0, 24)) {
+      try { const r = await camReaction(src, facecam, c.peak, info.duration); c.reaction = r.reaction; c.score = +(c.score + r.reaction * 0.5).toFixed(3); } catch (e) {}
+    }
+    candidates.sort((a, b) => b.score - a.score);
+  }
 
   let aiRes = null;
   if (ai.enabled() && settings.useAI) {
@@ -308,13 +352,6 @@ async function processJob(job) {
   const ins = db.prepare(`INSERT INTO clips (job_id, kind, file, thumb, segments, duration, score, title, description, tags, thumb_text, status, privacy, created_at, category)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '${String(video.categoryId || '24').replace(/\D/g, '')}')`);
 
-  // streamer webcam in the video? (same face, same place in most frames) -> split-screen Shorts
-  let facecam = null;
-  if (settings.makeShorts && settings.facecamLayout) {
-    setJob(job.id, { step: 'Webkamera qidirilmoqda' });
-    facecam = await subs.detectFacecam(src);
-    if (facecam) log(`#${job.id}: webkamera topildi (${facecam.w}×${facecam.h} @${facecam.x},${facecam.y}, chegara ${JSON.stringify(facecam.border)}, ${facecam.hits}/${facecam.samples} kadrda) — Shorts tepada kamera, pastda o'yin`);
-  }
   // end card: the connected channel's name (or the brand / settings name) and its logo if a brand kit exists
   let channelName = settings.channelName;
   try { const ch = yt.connected() ? await yt.channelInfo() : null; if (ch?.title) channelName = ch.title; } catch (e) {}
@@ -367,10 +404,13 @@ async function processJob(job) {
       }
       await render.renderShort(src, s, out, dir, { words, accent: settings.accent, style: settings.subtitleStyle, emoji: s.emoji, effects: settings.effects, emojis: settings.emojis, facecam,
         zoom: settings.zoom, endCard: settings.outro ? card : null, meme: settings.memes ? s.meme : '', climaxFull: settings.climaxFull });
-      await render.grabFrame(out, 1.5, thumb, 540);
+      // hook: open on the climax for ~1.3 s, then the story from its start
+      let hooked = false;
+      if (settings.hook) { try { hooked = await render.addHook(out, s.peakOut ?? ((s.peak ?? s.start) - s.start), dir); } catch (e) { log('Hook qo\'shilmadi: ' + e.message.slice(0, 160), 'warn'); } }
+      await render.grabFrame(out, hooked ? 0.7 : 1.5, thumb, 540);
       const description = [title, '', creditLine(job), '', ['#shorts', ...hashtags].join(' ')].join('\n');
       const shortDur = s.parts ? s.parts.reduce((t, p) => t + p.end - p.start, 0) : s.end - s.start;
-      const r = ins.run(job.id, 'short', out, thumb, JSON.stringify([s]), Math.min(60, shortDur), s.final,
+      const r = ins.run(job.id, 'short', out, thumb, JSON.stringify([s]), Math.min(60, shortDur + (hooked ? 1.3 : 0)), s.final,
         (title + ' #shorts').slice(0, 100), description, JSON.stringify([...tags.slice(0, 10), 'shorts']), '', status, settings.privacy, Date.now());
       created.push(Number(r.lastInsertRowid)); done++;
       setJob(job.id, { progress: done / totalSteps });

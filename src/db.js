@@ -58,6 +58,9 @@ const DEFAULTS = {
   accent: '#FFD400',           // thumbnail text colour
   keepSource: false,           // delete downloaded stream after rendering
   useAI: true,
+  aiListen: true,              // the AI listens to the whole audio to find laughs, hype, jokes (Gemini)
+  camReactions: true,          // streamer webcam movement raises moments with a strong reaction
+  hook: true,                  // Shorts open on their climax for ~1.3 s, then the story from the start
   aiProvider: 'auto',          // auto (Gemini first — free, then Claude) | gemini | claude
   aiWatchMaxMinutes: 180,      // Gemini watches the whole YouTube video itself if it is at most this long
   subtitles: true,             // word-by-word captions on Shorts (needs python3 + faster-whisper)

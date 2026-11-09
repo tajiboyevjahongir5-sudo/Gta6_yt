@@ -279,4 +279,29 @@ async function grabFrame(src, atSec, out, width = 512) {
   return out;
 }
 
-module.exports = { renderOutro, facecamCrops, renderCompilation, renderShort, renderThumbnail, grabFrame, fmtTime };
+// Hook (cold open): the first ~1.3 s of the Short is its own climax, then a white flash + whoosh and the story from
+// the start. Cut from the finished Short itself, so the layout, subtitles and effects of that moment come with it.
+async function addHook(file, peakOut, workDir, { len = 1.3 } = {}) {
+  const fx = require('./fx');
+  const { probe } = require('./analyze');
+  const info = await probe(file);
+  if (!info.duration || info.duration < 12) return false;
+  const a = Math.max(0, Math.min(info.duration - len - 0.5, peakOut - 0.45)), b = a + len;
+  if (a < 3) return false; // the climax is already at the start
+  const whoosh = await fx.sfx('whoosh');
+  const tmp = path.join(workDir, `hook_${Date.now()}.mp4`);
+  // two separate reads of the file (hook piece + whole), so ffmpeg never buffers frames between them
+  const fc = `[0:v]setpts=PTS-STARTPTS,fade=t=out:st=${(len - 0.14).toFixed(2)}:d=0.14:color=white[hv];` +
+    `[0:a]asetpts=PTS-STARTPTS,afade=t=out:st=${(len - 0.2).toFixed(2)}:d=0.2[ha];` +
+    `[1:v]setpts=PTS-STARTPTS,fade=t=in:st=0:d=0.22:color=white[mv];[1:a]asetpts=PTS-STARTPTS,afade=t=in:st=0:d=0.15[ma];` +
+    `[hv][ha][mv][ma]concat=n=2:v=1:a=1[v][a0];` +
+    `[2:a]aformat=sample_rates=48000:channel_layouts=stereo,volume=0.5,adelay=${Math.round((len - 0.3) * 1000)}|${Math.round((len - 0.3) * 1000)}[w];` +
+    `[a0]aformat=sample_rates=48000:channel_layouts=stereo[a1];[a1][w]amix=inputs=2:duration=first:normalize=0[a]`;
+  await run(FFMPEG, ['-y', '-hide_banner', '-loglevel', 'error', '-ss', a.toFixed(2), '-t', String(len), '-i', file, '-i', file, '-i', whoosh,
+    '-filter_complex', fc, '-map', '[v]', '-map', '[a]',
+    '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-maxrate', '16M', '-bufsize', '32M', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '160k', '-ac', '2', '-ar', '48000', '-movflags', '+faststart', tmp]);
+  fs.renameSync(tmp, file);
+  return true;
+}
+
+module.exports = { addHook, renderOutro, facecamCrops, renderCompilation, renderShort, renderThumbnail, grabFrame, fmtTime };

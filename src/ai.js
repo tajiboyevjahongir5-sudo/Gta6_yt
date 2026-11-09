@@ -52,7 +52,7 @@ let geminiWorking = null;
 async function callGemini({ parts, schema, youtube, quality }) {
   const key = geminiKey(); if (!key) throw new Error('Gemini kaliti yo\'q');
   const gparts = parts.map((p) => (p.image ? { inlineData: { mimeType: 'image/jpeg', data: b64(p.image) } }
-    : p.audio ? { inlineData: { mimeType: 'audio/wav', data: b64(p.audio) } } : { text: p.text }));
+    : p.audio ? { inlineData: { mimeType: p.mime || 'audio/wav', data: b64(p.audio) } } : { text: p.text }));
   const build = (withVideo) => ({
     contents: [{ role: 'user', parts: withVideo && youtube
       ? [{ fileData: { fileUri: youtube.url }, videoMetadata: { fps: youtube.fps || 0.5 } }, ...gparts] : gparts }],
@@ -171,11 +171,13 @@ async function rankAndDescribe({ candidates, source, settings, context = {} }) {
     for (const f of context.overview) parts.push({ image: f });
   }
   candidates.forEach((cand, i) => {
-    parts.push({ text: `Candidate moment #${i} (${Math.round(cand.start)}–${Math.round(cand.end)} s, loudness/motion score ${cand.score}):` });
+    parts.push({ text: `Candidate moment #${i} (${Math.round(cand.start)}–${Math.round(cand.end)} s, loudness/motion score ${cand.score})` +
+      (cand.heard ? `. Heard by an AI listening to the whole audio: ${cand.heard.kind}, intensity ${cand.heard.intensity}/10 — ${cand.heard.why}${cand.heard.quote ? ` ("${cand.heard.quote}")` : ''}` : '') +
+      (cand.reaction != null ? `. Streamer webcam reaction: ${cand.reaction >= 2 ? 'strong' : cand.reaction >= 1 ? 'some' : 'none'}` : '') + ':' });
     for (const f of cand.frames) parts.push({ image: f });
   });
   parts.push({ text:
-    `The candidate moments were found automatically by loudness and motion in the source video above.\n` +
+    `The candidate moments were found automatically by loudness, motion, an AI listening to the whole audio, and the streamer's webcam movement.\n` +
     `1) First work out what this video really is from ALL the evidence (metadata, transcript, frames${context.youtube ? ', the video itself' : ''}): the exact game or topic. ` +
     `Never assume a game that the evidence doesn't show.` +
     (settings.game ? ` The channel owner says the topic is usually "${settings.game}" — use it only if the evidence agrees.` : '') + `\n` +
@@ -225,4 +227,38 @@ function templateMeta({ source, settings, count, meta = {} }) {
 }
 const t = (s) => s.slice(0, 100);
 
-module.exports = { rankAndDescribe, templateMeta, generateJSON, providers, geminiKey, EMOJIS, getClient, LANG, enabled };
+// The AI LISTENS to the whole stream (audio is light: ~40-minute pieces) and marks the moments worth clipping —
+// laughter, hype, jokes, surprising lines, arguments, fails — including quiet funny ones that loudness misses.
+// Returns [{start, end, peak, kind, intensity 1-10, why, quote}] in seconds of the source.
+async function listenMoments(chunks, { subject = '', title = '', settings = {} } = {}) {
+  if (!providers().includes('gemini')) return [];
+  const all = [];
+  for (const c of chunks) {
+    const mins = Math.round(c.dur / 60);
+    const r = await generateJSON({
+      schema: { type: 'object', additionalProperties: false, required: ['moments'], properties: { moments: { type: 'array', items: {
+        type: 'object', additionalProperties: false, required: ['start', 'end', 'peak', 'kind', 'intensity', 'why'],
+        properties: { start: { type: 'number' }, end: { type: 'number' }, peak: { type: 'number' },
+          kind: { type: 'string', enum: ['laugh', 'hype', 'joke', 'surprise', 'fail', 'win', 'argument', 'story', 'reaction', 'other'] },
+          intensity: { type: 'number' }, why: { type: 'string' }, quote: { type: 'string' } } } } } },
+      parts: [{ text: `Audio of part of a stream/video${title ? ` "${title}"` : ''}${subject ? ` (${subject})` : ''}: ${mins} minutes, starting at ${Math.round(c.offset / 60)} min of the source.` },
+        { audio: c.file, mime: 'audio/ogg' }, { text:
+        `Listen to ALL of it like a professional clip editor and mark the moments people would want to watch as a Short: ` +
+        `real laughter, shouting / hype, jokes and funny lines, surprising or shocking moments, fails, big wins, heated arguments, ` +
+        `strong emotional reactions, a great short story. Quiet funny moments count too. Ignore plain gameplay noise, music, ads, silence, ` +
+        `small talk and reading chat without a reaction. Up to 10 moments, the best first. ` +
+        `start/end/peak = seconds from the start of THIS audio (decimals): start = where the setup begins (context), peak = the funniest / ` +
+        `loudest / key instant, end = after the reaction. intensity 1-10 (10 = must clip). why = short reason in English. ` +
+        `quote = the key words said, in the original language (short). If nothing is worth clipping, return an empty list.` }],
+    });
+    for (const m of r?.data?.moments || []) {
+      if (!(m.peak >= 0 && m.peak <= c.dur + 5)) continue;
+      const st = Math.max(0, Math.min(m.start, m.peak)), en = Math.max(m.peak, m.end);
+      all.push({ start: c.offset + st, end: c.offset + Math.min(en, st + 120), peak: c.offset + m.peak, kind: m.kind,
+        intensity: Math.max(1, Math.min(10, Math.round(m.intensity))), why: String(m.why || '').slice(0, 160), quote: String(m.quote || '').slice(0, 120) });
+    }
+  }
+  return all;
+}
+
+module.exports = { listenMoments, rankAndDescribe, templateMeta, generateJSON, providers, geminiKey, EMOJIS, getClient, LANG, enabled };
