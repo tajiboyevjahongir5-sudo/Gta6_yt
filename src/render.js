@@ -304,4 +304,42 @@ async function addHook(file, peakOut, workDir, { len = 1.3 } = {}) {
   return true;
 }
 
-module.exports = { addHook, renderOutro, facecamCrops, renderCompilation, renderShort, renderThumbnail, grabFrame, fmtTime };
+// ---- phone compatibility (iPhone is strict: H.264 8-bit 4:2:0 up to level 4.2, AAC, index at the start) ----
+async function diagnose(file) {
+  const out = { size: fs.statSync(file).size };
+  try { const st = fs.statfsSync(path.dirname(file)); out.diskFreeMB = Math.round((st.bavail * st.bsize) / 1048576); } catch (e) {}
+  try {
+    const { out: o } = await run(require('./config').FFPROBE, ['-v', 'error', '-print_format', 'json', '-show_format', '-show_streams', file]);
+    const j = JSON.parse(o); const v = (j.streams || []).find((x) => x.codec_type === 'video') || {}; const a = (j.streams || []).find((x) => x.codec_type === 'audio') || {};
+    Object.assign(out, { duration: +j.format?.duration || 0, vcodec: v.codec_name, profile: v.profile, level: v.level, pix: v.pix_fmt, w: v.width, h: v.height, fps: v.avg_frame_rate, acodec: a.codec_name || null });
+    // where the index (moov) sits: at the start = phone can stream it
+    const head = Buffer.alloc(64 * 1024); const fd = fs.openSync(file, 'r'); fs.readSync(fd, head, 0, head.length, 0); fs.closeSync(fd);
+    out.indexAtStart = head.includes(Buffer.from('moov'));
+  } catch (e) { out.error = 'Fayl o\'qilmadi (chala yozilgan bo\'lishi mumkin): ' + e.message.slice(-160); }
+  const bad = [];
+  if (out.error) bad.push(out.error);
+  else {
+    if (out.vcodec !== 'h264') bad.push('video kodek ' + out.vcodec);
+    if (out.pix && out.pix !== 'yuv420p') bad.push('rang formati ' + out.pix);
+    if (/High 10|4:4:4|4:2:2/i.test(out.profile || '')) bad.push('profil ' + out.profile);
+    if (out.level > 42) bad.push('level ' + out.level);
+    if (out.acodec && out.acodec !== 'aac') bad.push('audio ' + out.acodec);
+    if (!out.indexAtStart) bad.push('indeks fayl oxirida');
+    if (out.duration < 2) bad.push('davomiylik ' + out.duration + ' s');
+  }
+  if (out.diskFreeMB != null && out.diskFreeMB < 500) bad.push(`diskda joy kam: ${out.diskFreeMB} MB`);
+  out.problems = bad;
+  return out;
+}
+// re-encode to what every phone plays (only when something is off, unless forced)
+async function makeCompatible(file, force = false) {
+  if (!force) { const d = await diagnose(file); if (!d.problems.filter((p) => !/diskda/.test(p)).length) return false; }
+  const tmp = file + '.compat.mp4';
+  await run(FFMPEG, ['-y', '-hide_banner', '-loglevel', 'error', '-i', file, '-map', '0:v:0', '-map', '0:a:0?',
+    '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '21', '-profile:v', 'high', '-level:v', '4.1', '-pix_fmt', 'yuv420p', '-r', '30',
+    '-maxrate', '12M', '-bufsize', '24M', '-c:a', 'aac', '-b:a', '160k', '-ac', '2', '-ar', '48000', '-movflags', '+faststart', tmp]);
+  fs.renameSync(tmp, file);
+  return true;
+}
+
+module.exports = { diagnose, makeCompatible, addHook, renderOutro, facecamCrops, renderCompilation, renderShort, renderThumbnail, grabFrame, fmtTime };

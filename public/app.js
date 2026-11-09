@@ -214,8 +214,15 @@ async function openClip(id) {
       try { const r = await fetch(media(id, 'video'), { method: 'HEAD' }); const mb = (+r.headers.get('content-length') || 0) / 1048576;
         why = r.ok ? `fayl bor (${mb.toFixed(1)} MB), lekin telefon uni ocha olmadi — fayl buzuq bo'lishi mumkin` : `server ${r.status} qaytardi — fayl topilmadi`; } catch (e) { why = 'serverga ulanib bo\'lmadi'; }
       const box = document.createElement('div'); box.className = 'warnbox'; box.style.marginTop = '8px';
-      box.textContent = `⚠️ Video ochilmadi: ${why}. Navbatda shu videoni "Qayta tayyorlash" qiling.`;
+      box.innerHTML = `⚠️ Video ochilmadi: ${esc(why)}.<div class="small" id="dg" style="margin-top:6px">Tekshirilmoqda…</div>
+        <button class="btn sm" id="fixV" style="margin-top:8px">🔧 Telefon uchun tuzatish</button>`;
       (v.closest('.phone') || v).after(box);
+      const show = (d) => { $('#dg').textContent = (d.problems?.length ? 'Topilgan muammo: ' + d.problems.join(', ') : 'Format joyida') +
+        ` · ${d.vcodec || '?'} ${d.profile || ''} ${d.pix || ''} · ${d.w || '?'}×${d.h || '?'} · ${d.duration ? d.duration.toFixed(1) + ' s' : ''}` + (d.diskFreeMB != null ? ` · diskda ${d.diskFreeMB} MB bo'sh` : ''); };
+      api(`/api/clips/${id}/diag`).then(show).catch((e) => { $('#dg').textContent = e.message; });
+      $('#fixV').onclick = async (e) => { e.target.disabled = true; e.target.textContent = 'Qayta kodlanmoqda…';
+        try { const d = await api(`/api/clips/${id}/fix`, { method: 'POST', timeout: 300000 }); show(d); toast('✅ Tuzatildi'); openClip(id); }
+        catch (er) { toast(er.message); e.target.disabled = false; e.target.textContent = '🔧 Telefon uchun tuzatish'; } };
     }); }
   $('#sheet').classList.remove('hidden');
   $('#x').onclick = closeSheet;

@@ -201,6 +201,13 @@ async function api(req, res, url) {
       return send(res, 200, clipView(db.prepare('SELECT * FROM clips WHERE id = ?').get(id)));
     }
   }
+  // why a clip won't play on a phone: codec/profile/pixel format, a cut-off file, free disk space; "fix" re-encodes it
+  if ((mm = p.match(/^\/api\/clips\/(\d+)\/(diag|fix)$/)) && (m === 'GET' || m === 'POST')) {
+    const c = db.prepare('SELECT file FROM clips WHERE id = ?').get(+mm[1]);
+    if (!c || !c.file || !fs.existsSync(c.file)) return send(res, 404, { error: 'Fayl topilmadi' });
+    if (mm[2] === 'fix') { try { await require('./src/render').makeCompatible(c.file, true); } catch (e) { return send(res, 500, { error: 'Tuzatib bo\'lmadi: ' + e.message.slice(-300) }); } }
+    return send(res, 200, await require('./src/render').diagnose(c.file));
+  }
   if ((mm = p.match(/^\/api\/clips\/(\d+)\/(approve|reject|now|rethumb)$/)) && m === 'POST') {
     const id = +mm[1]; const c = parseClip(db.prepare('SELECT * FROM clips WHERE id = ?').get(id));
     if (!c) return send(res, 404, { error: 'Topilmadi' });
