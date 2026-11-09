@@ -447,10 +447,17 @@ async function processJob(job) {
         log(`#${job.id}: hikoyali Shorts — ${parts.length} bo'lak, ${Math.round(rel.reduce((t, p) => t + p.end - p.start, 0))} s`);
       } else {
         // single moment: listen to a wider stretch, then pick a hook start + clean end from the speech
-        const w0 = Math.max(0, peak - 8), wDur = Math.min(info.duration - w0, 30);
+        // one continuous piece that still tells the story: setup (where the AI heard it start, else ~15 s before),
+        // the key moment, and what happens after it; at least 30 s
+        const h = m.heard; const target = Math.max(30, settings.shortTarget || 55);
+        const after = (h && h.end > peak ? Math.min(25, Math.max(6, h.end - peak)) : (score ? storyAfter(score, peak, info.duration) : 10)) + (settings.outro ? 3.5 : 0);
+        const before = Math.max(h && h.start < peak ? Math.min(40, peak - h.start) : 15, 30 - after);
+        const w0 = Math.max(0, peak - before - 3), wDur = Math.min(info.duration - w0, before + after + 9);
         const wide = settings.subtitles ? await subs.transcribe(src, w0, wDur, dir, asr) : [];
         const abs = wide.map((w) => ({ ...w, start: w.start + w0, end: w.end + w0 }));
-        const win = info.duration <= 75 ? { start: m.start, end: m.end, peak } : shortWindow({ ...m, peak }, abs, info.duration);
+        const win = info.duration <= 75 ? { start: m.start, end: m.end, peak }
+          : shortWindow({ ...m, peak }, abs, info.duration, { before, after, min: Math.min(30, target), max: Math.max(target, 58) });
+        log(`#${job.id}: Shorts — yaxlit ${Math.round(win.end - win.start)} s (${Math.round(peak - win.start)} s oldin, ${Math.round(win.end - peak)} s keyin)`);
         s = { ...m, ...win };
         words = abs.filter((w) => w.end > s.start && w.start < s.end).map((w) => ({ ...w, start: +(w.start - s.start).toFixed(2), end: +(w.end - s.start).toFixed(2) }));
       }
