@@ -69,6 +69,7 @@ const pages = { home, jobs, clips, stats, sources, settings };
 const here = (p) => page === p;
 function go(p) {
   page = p; clearInterval(timer); closeSheet();
+  document.body.classList.toggle('home', p === 'home');
   document.querySelectorAll('.tabs button').forEach((b) => b.classList.toggle('on', b.dataset.page === p));
   window.scrollTo(0, 0);
   $('#view').innerHTML = '<div class="empty"><span class="spin"></span></div>';

@@ -24,7 +24,7 @@ button,input,textarea,select{font:inherit;color:inherit}
 /* glass surfaces */
 .glass,.card,.tile,.clip,.seg,.btn,input[type=text],input[type=url],input[type=number],input[type=password],textarea,select,.pill,.chips span{
   background:linear-gradient(180deg,rgba(255,255,255,.1),rgba(255,255,255,.045));border:1px solid var(--edge);box-shadow:var(--spec)}
-.top{position:sticky;top:0;z-index:5;display:flex;align-items:center;justify-content:space-between;
+.top{position:relative;z-index:5;display:flex;align-items:center;justify-content:space-between;
   padding:calc(10px + var(--tg-safe-area-inset-top,0px) + var(--tg-content-safe-area-inset-top,0px)) 16px 10px;
   background:rgba(10,11,17,.55);-webkit-backdrop-filter:blur(26px) saturate(180%);backdrop-filter:blur(26px) saturate(180%);border-bottom:1px solid var(--line)}
 .brand{display:flex;gap:11px;align-items:center}.brand b{font-size:17px;letter-spacing:-.02em}.brand small{display:block;color:var(--muted);font-size:12px}
@@ -120,3 +120,7 @@ table{width:100%;border-collapse:collapse;font-size:13px}td,th{padding:8px 4px;b
 .phone .desc{position:absolute;left:4%;right:16%;bottom:3%;font-size:1.5vh;line-height:1.5}
 
 .spin{display:inline-block;width:26px;height:26px;border:3px solid var(--s2);border-top-color:var(--accent);border-radius:50%;animation:sp .8s linear infinite}@keyframes sp{to{transform:rotate(360deg)}}
+
+/* the header (logo, name, settings) belongs to the home page only and scrolls away with it */
+body:not(.home) .top{display:none}
+body:not(.home) main{padding-top:calc(14px + var(--tg-safe-area-inset-top,0px) + var(--tg-content-safe-area-inset-top,0px))}
