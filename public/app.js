@@ -293,6 +293,7 @@ function bar(label, pct, value) {
     <div style="height:8px;background:rgba(255,255,255,.08);border-radius:6px;overflow:hidden"><div style="height:100%;width:${Math.max(1, pct)}%;background:${pct >= 100 ? '#3ecf6e' : 'var(--accent, #FFD400)'}"></div></div></div>`;
 }
 function growthCard(g) {
+  lastGrowth = g;
   const m = g.monetization, r = g.report;
   const miss = !g.scopes.comments || !g.scopes.analytics;
   return `<h2 class="row">${appi('trend', 'linear-gradient(160deg,#4cd964,#1fa34a)')}<span>O'sish va monetizatsiya</span></h2>
@@ -304,11 +305,8 @@ function growthCard(g) {
       <div class="small muted">Shart: 1 000 obunachi + (10 mln Shorts ko'rish yoki 4 000 soat). Boshlang'ich bosqich: 500 obunachi + 3 mln Shorts ko'rish yoki 3 000 soat + 90 kunda 3 ta video.${m.source === 'estimate' ? " Shorts ko'rishlar taxminiy (Analytics API ulanmagan)." : ''}</div></div>` : ''}
     <div class="card"><div class="row"><b class="grow">Kunlik tahlil</b><button class="btn sm" id="ganal">Hozir tahlil qilish</button></div>
       ${r ? `<div class="small muted">${ago2(r.at)} · ${r.videos} ta video${r.analytics ? ' · Analytics bilan' : ''}</div>
-        <p>${esc(r.summary)}</p>
-        ${r.diagnosis.map((d) => `<div style="margin:8px 0"><b>⚠️ ${esc(d.problem)}</b><div class="small muted">${esc(d.evidence)}</div><div class="small">✅ ${esc(d.fix)}</div></div>`).join('')}
-        ${r.lessons.length ? `<b>Keyingi montajlarda qo'llanadi</b><ul class="small">${r.lessons.map((l) => `<li>${esc(l)}</li>`).join('')}</ul>` : ''}
-        <div class="small muted">Shorts uzunligi: ~${Math.round(r.idealShortSeconds)} s</div>
-        ${r.monetizationPlan?.length ? `<b>Monetizatsiyaga tezroq chiqish rejasi</b><ol class="small">${r.monetizationPlan.map((l) => `<li>${esc(l)}</li>`).join('')}</ol>` : ''}`
+        <p class="small" style="display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden">${esc(r.summary)}</p>
+        <button class="btn" id="gOpen" style="width:100%;display:flex;align-items:center;justify-content:center;gap:10px">${appi('trend', 'linear-gradient(160deg,#4cd964,#1fa34a)')}<span>To'liq tahlil (${r.diagnosis.length} muammo, ${r.lessons.length} qoida)</span></button>`
       : '<div class="small muted">Hali tahlil qilinmagan (har kuni avtomatik). Hozir boshlash uchun tugmani bosing.</div>'}</div>
     <div class="card"><div class="row">${appi('chat', 'linear-gradient(160deg,#5ac8fa,#0a84ff)')}<b class="grow">Komentlarga javoblar</b><span class="small muted">bugun ${g.repliesToday}</span><button class="btn sm" id="greply">Hozir javob berish</button></div>
       ${g.replies.length ? g.replies.map((x) => `<div style="margin:8px 0"><div class="small muted ellipsis">${esc(x.title || '')}</div><div class="small">🗨 ${esc(x.comment)}</div><div class="small">↳ <b>${esc(x.reply)}</b></div></div>`).join('')
@@ -369,10 +367,23 @@ function bindStyles() {
     try { await api('/api/styles', { method: 'POST', body: { niche } }); toast("O'rganish boshlandi — bir necha daqiqa oladi"); loadStyles(); }
     catch (er) { toast(er.message); e.target.disabled = false; } };
 }
+let lastGrowth = null;
+// the full daily analysis opens in its own sheet (the Statistics page stays short)
+function openAnalysis() {
+  const r = lastGrowth?.report; if (!r) return;
+  $('#sheetBody').innerHTML = `<div class="row" style="margin-bottom:10px"><b class="grow">Kunlik tahlil</b>${xBtn}</div><div class="small muted">${ago2(r.at)} · ${r.videos} ta video${r.analytics ? ' · Analytics bilan' : ''}</div>
+        <p>${esc(r.summary)}</p>
+        ${r.diagnosis.map((d) => `<div style="margin:8px 0"><b>⚠️ ${esc(d.problem)}</b><div class="small muted">${esc(d.evidence)}</div><div class="small">✅ ${esc(d.fix)}</div></div>`).join('')}
+        ${r.lessons.length ? `<b>Keyingi montajlarda qo'llanadi</b><ul class="small">${r.lessons.map((l) => `<li>${esc(l)}</li>`).join('')}</ul>` : ''}
+        <div class="small muted">Shorts uzunligi: ~${Math.round(r.idealShortSeconds)} s</div>
+        ${r.monetizationPlan?.length ? `<b>Monetizatsiyaga tezroq chiqish rejasi</b><ol class="small">${r.monetizationPlan.map((l) => `<li>${esc(l)}</li>`).join('')}</ol>` : ''}`;
+  $('#sheet').classList.remove('hidden'); $('#x').onclick = closeSheet;
+}
 function reloadGrowth() {
   api('/api/growth', { timeout: 60000 }).then((g) => { if (!here('stats') || !$('#growth')) return; growthHtml = growthCard(g); $('#growth').innerHTML = growthHtml; bindGrowth(); }).catch(() => {});
 }
 function bindGrowth() {
+  if ($('#gOpen')) $('#gOpen').onclick = openAnalysis;
   if ($('#reconn2')) $('#reconn2').onclick = (e) => { e.preventDefault(); connectYouTube(); };
   if ($('#ganal')) $('#ganal').onclick = async (e) => { e.target.disabled = true; e.target.textContent = 'Tahlil qilinmoqda…';
     try { const r = await api('/api/growth/analyze', { method: 'POST', timeout: 300000 }); toast(r.skipped ? 'Hali video kam: ' + r.skipped : 'Tahlil tayyor'); reloadGrowth(); }
