@@ -29,19 +29,50 @@ function client() {
   return clientP;
 }
 
-// message_id from the Bot API update -> the same message over MTProto (private chats share message ids) -> file
-async function download(messageId, dest, onProgress) {
+// message_id from the Bot API update -> the same message over MTProto (private chats share message ids) -> file.
+// Downloaded in 512 KB pieces with resume: Telegram's file servers sometimes answer a piece with a temporary error
+// ("-500 No workers running", timeouts); then we wait, re-read the message (fresh file reference) and continue
+// from the last byte instead of starting the 1 GB over.
+async function getDoc(c, messageId) {
   const { Api } = require('telegram');
-  const c = await client();
   const res = await c.invoke(new Api.messages.GetMessages({ id: [new Api.InputMessageID({ id: messageId })] }));
   const msg = (res.messages || []).find((x) => x && x.media);
-  if (!msg) throw new Error('Xabar topilmadi (MTProto)');
-  let last = 0;
-  await c.downloadMedia(msg, { outputFile: dest, workers: 4, progressCallback: (got, total) => {
-    const p = Math.floor((Number(got) / Math.max(1, Number(total))) * 100);
-    if (onProgress && p >= last + 10) { last = p; onProgress(p); }
-  } });
-  if (!fs.existsSync(dest) || fs.statSync(dest).size < 1000) throw new Error('Fayl yuklanmadi');
+  const doc = msg?.media?.document;
+  if (!doc) throw new Error('Xabar topilmadi (MTProto)');
+  return doc;
+}
+async function download(messageId, dest, onProgress) {
+  const { Api } = require('telegram');
+  const bigInt = require('big-integer');
+  const c = await client();
+  const PIECE = 512 * 1024;
+  let doc = await getDoc(c, messageId);
+  const total = Number(doc.size);
+  fs.writeFileSync(dest, '');
+  let got = 0, fails = 0, last = 0;
+  while (got < total) {
+    try {
+      const loc = new Api.InputDocumentFileLocation({ id: doc.id, accessHash: doc.accessHash, fileReference: doc.fileReference, thumbSize: '' });
+      const fd = fs.openSync(dest, 'a');
+      try {
+        for await (const chunk of c.iterDownload({ file: loc, offset: bigInt(got), requestSize: PIECE, dcId: doc.dcId, fileSize: bigInt(total) })) {
+          fs.writeSync(fd, chunk); got += chunk.length; fails = 0;
+          const p = Math.floor((got / total) * 100);
+          if (onProgress && p >= last + 10) { last = p - (p % 10); onProgress(last); }
+          if (got >= total) break;
+        }
+      } finally { fs.closeSync(fd); }
+      if (got < total) throw new Error('Yuklash kutilmaganda to\'xtadi');
+    } catch (e) {
+      if (++fails > 12) throw new Error(`${e.message} (${Math.round(got / 1048576)}/${Math.round(total / 1048576)} MB yuklangan edi)`);
+      log(`Katta video: ${Math.round(got / 1048576)} MB da uzildi (${String(e.message).slice(0, 80)}), ${fails}-qayta urinish`, 'warn');
+      // keep only whole pieces (the offset must be a multiple of the piece size), wait, refresh the file reference
+      got = Math.floor(got / PIECE) * PIECE; fs.truncateSync(dest, got);
+      await new Promise((ok) => setTimeout(ok, Math.min(60000, 3000 * fails)));
+      try { doc = await getDoc(c, messageId); } catch (er) { /* keep the old reference */ }
+    }
+  }
+  if (fs.statSync(dest).size < total) throw new Error('Fayl to\'liq yuklanmadi');
   return dest;
 }
 
