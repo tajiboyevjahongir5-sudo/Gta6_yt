@@ -10,7 +10,7 @@ const WEEK = 7 * 86400000;
 const keyOf = (s) => String(s || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim().slice(0, 60);
 
 // most-viewed Shorts of the niche from the last 90 days (YouTube Data API search: 100 quota units, once a week per niche)
-async function viralShorts(niche, max = 4) {
+async function viralShorts(niche, max = 8) {
   const after = new Date(Date.now() - 90 * 86400000).toISOString();
   const q = encodeURIComponent(`${niche} #shorts`);
   const s = await yt.apiGet(`search?part=snippet&type=video&videoDuration=short&order=viewCount&maxResults=15&publishedAfter=${after}&q=${q}`);
@@ -30,7 +30,7 @@ function channelRef(text) {
   m = t.match(/youtube\.com\/channel\/(UC[\w-]{20,})/i) || t.match(/^(UC[\w-]{20,})$/);
   return m ? { id: m[1] } : null;
 }
-async function channelShorts(ref, max = 4) {
+async function channelShorts(ref, max = 12) {
   const c = await yt.apiGet('channels?part=snippet,contentDetails&' + (ref.id ? 'id=' + ref.id : 'forHandle=' + encodeURIComponent(ref.handle)));
   const ch = c.items?.[0]; if (!ch) throw new Error('Kanal topilmadi: ' + (ref.handle || ref.id));
   const up = ch.contentDetails?.relatedPlaylists?.uploads; const ids = []; let page = '';
@@ -40,9 +40,10 @@ async function channelShorts(ref, max = 4) {
   const vids = [];
   for (let i = 0; i < ids.length; i += 50) {
     const v = await yt.apiGet('videos?part=snippet,statistics,contentDetails&id=' + ids.slice(i, i + 50).join(','));
-    for (const x of v.items || []) vids.push({ id: x.id, title: x.snippet.title, channel: x.snippet.channelTitle, views: +(x.statistics.viewCount || 0), duration: sec(x.contentDetails.duration) });
+    for (const x of v.items || []) vids.push({ id: x.id, title: x.snippet.title, channel: x.snippet.channelTitle, views: +(x.statistics.viewCount || 0), duration: sec(x.contentDetails.duration), published: Date.parse(x.snippet.publishedAt) });
   }
-  return { title: ch.snippet.title, handle: ch.snippet.customUrl || ref.handle || '', shorts: vids.filter((x) => x.duration > 0 && x.duration <= 180).sort((a, b) => b.views - a.views).slice(0, max) };
+  return { title: ch.snippet.title, handle: ch.snippet.customUrl || ref.handle || '', shorts: vids.filter((x) => x.duration > 0 && x.duration <= 180).sort((a, b) => b.views - a.views).slice(0, max),
+    longs: vids.filter((x) => x.duration > 180) };
 }
 
 const SCHEMA = { type: 'object', additionalProperties: false,
@@ -63,40 +64,100 @@ const SCHEMA = { type: 'object', additionalProperties: false,
     notPossibleYet: { type: 'array', items: { type: 'string' }, description: 'in Uzbek: techniques they use that an automatic editor with cuts, zooms, captions and sound effects cannot do' },
   } };
 
+const ANALYSIS = { type: 'object', additionalProperties: false, required: ['items'], properties: { items: { type: 'array', items: {
+  type: 'object', additionalProperties: false, required: ['n', 'whatHappens', 'whyInteresting', 'hook', 'structure', 'audio', 'emotion', 'techniques', 'momentType', 'titleRelation'],
+  properties: {
+    n: { type: 'number' },
+    whatHappens: { type: 'string', description: 'Uzbek: what happens in the Short, short' },
+    whyInteresting: { type: 'string', description: 'Uzbek: why people watch / share it (the real reason)' },
+    hook: { type: 'string', description: 'Uzbek: what the first 1-2 seconds show / say' },
+    structure: { type: 'string', description: 'Uzbek: setup -> key moment -> ending, with seconds' },
+    audio: { type: 'string', description: 'Uzbek: what you HEAR that makes it work: words, laughs, screams, sound effects, music' },
+    emotion: { type: 'string' },
+    techniques: { type: 'array', items: { type: 'string' }, description: 'editing techniques actually used (cuts, zooms, captions, sfx, memes, layout)' },
+    momentType: { type: 'string', enum: ['fail', 'win', 'prank', 'jumpscare', 'reaction', 'joke', 'argument', 'skill', 'story', 'other'] },
+    titleRelation: { type: 'string', description: 'Uzbek: how the title relates to the content' } } } } } };
+const MAPPING = { type: 'object', additionalProperties: false, required: ['found', 'startSec', 'endSec', 'why', 'cut', 'added'],
+  properties: { found: { type: 'boolean' }, startSec: { type: 'number' }, endSec: { type: 'number' },
+    why: { type: 'string', description: 'Uzbek: why the editor chose exactly this part of the long video' },
+    cut: { type: 'string', description: 'Uzbek: what of that part was left out / shortened' },
+    added: { type: 'string', description: 'Uzbek: what the Short adds that the long video does not have (captions, zoom, sfx, reorder)' } } };
+
+// progress of a running study, for the Web App
+const status = {};
+const setStatus = (key, label, step) => { status[key] = { niche: label, step, at: Date.now() }; };
+
 let learning = {};
-async function learn(niche) {
+async function learn(niche, { force = false } = {}) {
   const key = keyOf(niche);
   if (!key || !yt.connected() || !ai.providers().includes('gemini')) return null;
   const row = db.prepare('SELECT * FROM style_guides WHERE key = ?').get(key);
-  if (row && Date.now() - row.at < WEEK) return JSON.parse(row.data);
+  if (!force && row && Date.now() - row.at < WEEK) return JSON.parse(row.data);
   if (learning[key]) return learning[key];
   learning[key] = (async () => {
     const ref = channelRef(niche);
-    let shorts, label = niche, intro;
-    if (ref) {
-      const c = await channelShorts(ref); shorts = c.shorts; label = `${c.title}${c.handle ? ' (' + c.handle + ')' : ''}`;
-      intro = `These are the most-viewed YouTube Shorts of the channel "${c.title}". Learn THIS channel's editing style:`;
-    } else { shorts = await viralShorts(niche); intro = `These are the most-viewed YouTube Shorts of the last 90 days in the niche "${niche}":`; }
+    let shorts, longs = [], label = niche, who;
+    setStatus(key, niche, 'Shorts qidirilmoqda');
+    if (ref) { const c = await channelShorts(ref); shorts = c.shorts; longs = c.longs; label = `${c.title}${c.handle ? ' (' + c.handle + ')' : ''}`; who = `the channel "${c.title}"`; }
+    else { shorts = await viralShorts(niche); who = `the niche "${niche}"`; }
     if (shorts.length < 2) { log(`Montaj uslubi: "${niche}" bo'yicha mashhur Shorts topilmadi`, 'warn'); if (ref) throw new Error('Bu kanalda Shorts topilmadi'); return row ? JSON.parse(row.data) : null; }
+
+    // 1) every Short watched AND listened to in full, 3 at a time: what happens, why it works, hook, structure, sound
+    const analyses = [];
+    for (let i = 0; i < shorts.length; i += 3) {
+      const part = shorts.slice(i, i + 3);
+      setStatus(key, label, `Shorts ko'rilmoqda ${Math.min(i + 3, shorts.length)}/${shorts.length}`);
+      const r = await ai.generateJSON({ schema: ANALYSIS, parts: [
+        { text: `Popular YouTube Shorts of ${who}. Watch and LISTEN to each one in full, like a professional short-form editor studying why it went viral.` },
+        ...part.flatMap((x, k) => [{ text: `Short n=${i + k + 1}: "${x.title}" — ${x.views} views, ${x.duration}s` }, { youtube: `https://www.youtube.com/watch?v=${x.id}` }]),
+        { text: `For each Short answer: what happens; WHY it is interesting (the real reason people watch to the end and share); what the first 1-2 seconds do; ` +
+          `the structure with seconds; what you hear that makes it work (words, laughter, screams, sound effects, music); the emotion; the editing techniques actually used; ` +
+          `the type of moment; how the title relates to it. Only what you really see and hear.` }] });
+      for (const it of r?.data?.items || []) { const x = part[Math.round(it.n) - 1 - i]; if (x) analyses.push({ ...it, id: x.id, title: x.title, views: x.views, duration: x.duration }); }
+    }
+
+    // 2) channel: which long video of the same channel each top Short was cut from, which part, and why that part
+    const mappings = [];
+    if (ref && longs.length) {
+      const words = (t) => new Set(keyOf(t).split(' ').filter((w) => w.length > 3));
+      for (const x of shorts.slice(0, 5)) {
+        const cand = longs.filter((l) => l.published <= x.published + 3600000 && x.published - l.published < 45 * 86400000 && l.duration <= 3 * 3600)
+          .map((l) => ({ ...l, sim: [...words(l.title)].filter((w) => words(x.title).has(w)).length, gap: x.published - l.published }))
+          .sort((a, b) => b.sim - a.sim || a.gap - b.gap).slice(0, 2);
+        for (const l of cand) {
+          setStatus(key, label, `Manba qidirilmoqda: "${x.title.slice(0, 40)}"`);
+          const r = await ai.generateJSON({ schema: MAPPING, parts: [
+            { text: `A Short of ${who}:` }, { youtube: `https://www.youtube.com/watch?v=${x.id}` },
+            { text: `A long video of the same channel ("${l.title}", ${Math.round(l.duration / 60)} min):` }, { youtube: `https://www.youtube.com/watch?v=${l.id}`, fps: l.duration > 1800 ? 0.1 : 0.25, low: true },
+            { text: `Is the Short cut from this long video? If yes: start/end seconds of that part in the LONG video, why an editor chose exactly this part, ` +
+              `what was cut out, and what the Short adds. If it is not from this video, found=false.` }] });
+          const m = r?.data;
+          if (m?.found) { mappings.push({ short: x.id, shortTitle: x.title, long: l.id, longTitle: l.title, start: Math.round(m.startSec), end: Math.round(m.endSec), why: m.why, cut: m.cut, added: m.added }); break; }
+        }
+      }
+    }
+
+    // 3) everything together -> the style guide the editor follows
+    setStatus(key, label, 'Xulosa yozilmoqda');
     const r = await ai.generateJSON({
-      schema: SCHEMA, quality: 'high',
-      parts: [
-        { text: intro },
-        ...shorts.flatMap((s, i) => [{ text: `#${i + 1} "${s.title}" — ${s.channel}, ${s.views} views, ${s.duration}s` }, { youtube: `https://www.youtube.com/watch?v=${s.id}` }]),
-        { text: `Watch every one of them closely, like a professional short-form editor studying competitors. ` +
-          `Work out what they have in common: how the first 1-2 seconds hook the viewer, length, cut pace, layout, captions (style, position), ` +
-          `zooms, sound effects, music, meme text, how the key moment is shown, how they end, which kind of moments they choose, and how the titles are written. ` +
-          `Describe only what you actually see in these videos.` },
-      ],
+      schema: { ...SCHEMA, required: [...SCHEMA.required, 'whyTheyWork', 'clipPatterns'], properties: { ...SCHEMA.properties,
+        whyTheyWork: { type: 'array', items: { type: 'string' }, description: 'Uzbek, max 6: the common reasons these Shorts are interesting' },
+        clipPatterns: { type: 'array', items: { type: 'string' }, description: 'English, max 6: how a long video is turned into a Short here (which part is taken, where it starts and ends, what is cut)' } } },
+      quality: 'high',
+      parts: [{ text: `Study notes about ${analyses.length} popular Shorts of ${who} (each watched and listened to in full):\n` +
+        analyses.map((a) => `- "${a.title}" (${a.views} views, ${a.duration}s, ${a.momentType}): ${a.whatHappens} | WHY: ${a.whyInteresting} | HOOK: ${a.hook} | ` +
+          `STRUCTURE: ${a.structure} | SOUND: ${a.audio} | EMOTION: ${a.emotion} | TECHNIQUES: ${a.techniques.join(', ')} | TITLE: ${a.titleRelation}`).join('\n') +
+        (mappings.length ? `\n\nWhere Shorts were cut from the channel's long videos:\n` + mappings.map((m) => `- "${m.shortTitle}" = ${m.start}-${m.end}s of "${m.longTitle}": ${m.why} | cut: ${m.cut} | added: ${m.added}`).join('\n') : '') +
+        `\n\nWrite the editing style guide an automatic editor should follow to make Shorts like these: the common patterns, not one video.` }],
     });
     const g = r?.data; if (!g) return row ? JSON.parse(row.data) : null;
-    g.niche = label; g.channel = !!ref; g.sources = shorts; g.at = Date.now();
-    g.momentRules = (g.momentRules || []).slice(0, 6); g.editingRules = (g.editingRules || []).slice(0, 6);
+    Object.assign(g, { niche: label, channel: !!ref, sources: shorts, analyses, mappings, at: Date.now() });
+    g.momentRules = (g.momentRules || []).slice(0, 6); g.editingRules = (g.editingRules || []).slice(0, 6); g.clipPatterns = (g.clipPatterns || []).slice(0, 6);
     db.prepare('INSERT OR REPLACE INTO style_guides (key, niche, data, at) VALUES (?, ?, ?, ?)').run(key, niche, JSON.stringify(g), Date.now());
-    log(`Montaj uslubi o'rganildi: "${label}" — ${shorts.length} ta mashhur Shorts (${shorts.map((s) => Math.round(s.views / 1000) + 'K').join(', ')} ko'rish)`);
+    log(`Montaj uslubi o'rganildi: "${label}" — ${analyses.length} ta Shorts to'liq ko'rildi${mappings.length ? `, ${mappings.length} tasining manba videosi topildi` : ''}`);
     return g;
   })().catch((e) => { log('Montaj uslubini o\'rganib bo\'lmadi: ' + e.message.slice(0, 200), 'warn'); if (channelRef(niche)) throw e; return row ? JSON.parse(row.data) : null; })
-    .finally(() => { delete learning[key]; });
+    .finally(() => { delete learning[key]; delete status[key]; });
   return learning[key];
 }
 
@@ -113,7 +174,7 @@ function overrides(g) {
   if (g.subtitleStyle && g.subtitleStyle !== 'none') o.subtitleStyle = g.subtitleStyle;
   return o;
 }
-const rulesText = (g) => (g ? [...(g.momentRules || []), ...(g.editingRules || []), g.titleStyle ? 'Titles: ' + g.titleStyle : ''].filter(Boolean) : []);
+const rulesText = (g) => (g ? [...(g.momentRules || []), ...(g.clipPatterns || []), ...(g.editingRules || []), g.titleStyle ? 'Titles: ' + g.titleStyle : ''].filter(Boolean) : []);
 const all = () => db.prepare('SELECT niche, data, at FROM style_guides ORDER BY at DESC LIMIT 20').all().map((r) => JSON.parse(r.data));
 // the guide of the niche that is most likely for a new video (same words in the title), so moment picking can use it
 function guess(text) {
@@ -122,4 +183,4 @@ function guess(text) {
   return null;
 }
 
-module.exports = { channelRef, learn, overrides, rulesText, all, guess };
+module.exports = { status: () => Object.values(status), channelRef, learn, overrides, rulesText, all, guess };

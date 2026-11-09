@@ -53,12 +53,12 @@ async function callGemini({ parts, schema, youtube, quality }) {
   const key = geminiKey(); if (!key) throw new Error('Gemini kaliti yo\'q');
   const gparts = parts.map((p) => (p.image ? { inlineData: { mimeType: 'image/jpeg', data: b64(p.image) } }
     : p.audio ? { inlineData: { mimeType: p.mime || 'audio/wav', data: b64(p.audio) } }
-    : p.youtube ? { fileData: { fileUri: p.youtube } } : { text: p.text }));
+    : p.youtube ? { fileData: { fileUri: p.youtube }, ...(p.fps ? { videoMetadata: { fps: p.fps } } : {}) } : { text: p.text }));
   const build = (withVideo) => ({
     contents: [{ role: 'user', parts: withVideo && youtube
       ? [{ fileData: { fileUri: youtube.url }, videoMetadata: { fps: youtube.fps || 0.5 } }, ...gparts] : gparts }],
     generationConfig: { responseMimeType: 'application/json', responseSchema: toGeminiSchema(schema),
-      ...(withVideo && youtube ? { mediaResolution: 'MEDIA_RESOLUTION_LOW' } : {}) },
+      ...((withVideo && youtube) || parts.some((p) => p.low) ? { mediaResolution: 'MEDIA_RESOLUTION_LOW' } : {}) },
   });
   let lastErr;
   const busy = (st) => st === 503 || st === 500 || st === 502 || st === 504;

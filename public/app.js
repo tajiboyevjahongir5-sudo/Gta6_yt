@@ -314,24 +314,47 @@ function growthCard(g) {
       ${g.replies.length ? g.replies.map((x) => `<div style="margin:8px 0"><div class="small muted ellipsis">${esc(x.title || '')}</div><div class="small">🗨 ${esc(x.comment)}</div><div class="small">↳ <b>${esc(x.reply)}</b></div></div>`).join('')
         : '<div class="small muted">Hali javob yozilmagan. Bot har 3 soatda yangi komentlarni tekshiradi.</div>'}</div>`;
 }
-function stylesCard(list) {
+function stylesCard(d) {
+  const list = d.list || [];
   return `<h2 class="row">${appi('clips', 'linear-gradient(160deg,#ff6b8b,#ff2d55)')}<span>O'rganilgan montaj uslublari</span></h2>
-    <div class="card"><div class="small muted">Bot har yo'nalish bo'yicha so'nggi 90 kunda eng ko'p ko'rilgan Shorts'larni AI'ga ko'rsatadi va montajni ulardan o'rganadi (haftada bir yangilanadi). <b>@username</b> yoki kanal havolasini yozsangiz — o'sha kanalning eng ko'p ko'rilgan Shorts'laridan o'rganadi.</div>
-      <div class="row" style="margin-top:10px"><input type="text" id="stNiche" placeholder="CS2, Ready or Not… yoki kanal: @username" autocapitalize="off"><button class="btn sm primary" id="stLearn">O'rganish</button></div></div>
+    <div class="card"><div class="small muted">Bot Shorts'larni to'liq ko'rib va eshitib, har biri nima uchun qiziq ekanini tahlil qiladi va montajni ulardan o'rganadi (haftada bir yangilanadi).
+      Yo'nalish (CS2, Ready or Not…) yoki <b>@username</b> / kanal havolasi yozing: kanalda uning eng ko'p ko'rilgan 12 ta Shorts'i va ular kanalning qaysi uzun videosidan, qaysi joyidan olingani o'rganiladi.</div>
+      <div class="row" style="margin-top:10px"><input type="text" id="stNiche" placeholder="CS2, Ready or Not… yoki kanal: @username" autocapitalize="off"><button class="btn sm primary" id="stLearn">O'rganish</button></div>
+      ${(d.running || []).map((r) => `<div class="row small" style="margin-top:10px"><span class="spin" style="width:16px;height:16px;border-width:2px"></span><span><b>${esc(r.niche)}</b>: ${esc(r.step)}…</span></div>`).join('')}
+      ${d.error ? `<div class="warnbox" style="margin-top:10px">${esc(d.error)}</div>` : ''}</div>
     ${list.map((g) => `<div class="card"><div class="row"><b class="grow">${g.channel ? '📺 ' : ''}${esc(g.niche)}</b><span class="small muted">${ago2(g.at)}</span></div>
       <p class="small">${esc(g.summary)}</p>
-      <div class="chips">${[`~${Math.round(g.avgLength)} s`, `${Math.round(g.cutsPerMinute)} kesish/daq`, `hook: ${g.hook}`, `subtitr: ${g.subtitleStyle}`, `zoom: ${g.zoom}`, g.memeText ? 'mem-yozuv' : '', g.soundEffects ? 'effektlar' : ''].filter(Boolean).map((c) => `<span>${esc(c)}</span>`).join('')}</div>
-      <details style="margin-top:8px"><summary class="small">Qoidalar va manbalar</summary>
-        <ul class="small">${[...g.momentRules, ...g.editingRules].map((r) => `<li>${esc(r)}</li>`).join('')}</ul>
-        ${g.notPossibleYet?.length ? `<div class="small muted">Hali qila olmaydiganlarim: ${esc(g.notPossibleYet.join('; '))}</div>` : ''}
-        <div class="small">${(g.sources || []).map((x) => `<a href="#" data-src="${esc(x.id)}">▶ ${esc(x.title)} (${num(x.views)})</a>`).join('<br>')}</div></details></div>`).join('')}`;
+      <div class="chips">${[`~${Math.round(g.avgLength)} s`, `${Math.round(g.cutsPerMinute)} kesish/daq`, `hook: ${g.hook}`, `subtitr: ${g.subtitleStyle}`, `zoom: ${g.zoom}`, g.memeText ? 'mem-yozuv' : '', g.soundEffects ? 'effektlar' : '', g.analyses ? `${g.analyses.length} ta Shorts ko'rildi` : ''].filter(Boolean).map((c) => `<span>${esc(c)}</span>`).join('')}</div>
+      ${g.whyTheyWork?.length ? `<b class="small" style="display:block;margin-top:10px">Nima uchun qiziq</b><ul class="small">${g.whyTheyWork.map((r) => `<li>${esc(r)}</li>`).join('')}</ul>` : ''}
+      <details style="margin-top:8px"><summary class="small">Qoidalar</summary>
+        <ul class="small">${[...(g.clipPatterns || []), ...g.momentRules, ...g.editingRules].map((r) => `<li>${esc(r)}</li>`).join('')}</ul>
+        ${g.notPossibleYet?.length ? `<div class="small muted">Hali qila olmaydiganlarim: ${esc(g.notPossibleYet.join('; '))}</div>` : ''}</details>
+      ${g.mappings?.length ? `<details style="margin-top:6px"><summary class="small">Shorts qaysi uzun videodan olingan (${g.mappings.length})</summary>
+        ${g.mappings.map((m) => `<div class="small" style="margin:8px 0"><a href="#" data-src="${esc(m.short)}">▶ ${esc(m.shortTitle)}</a><br>
+          ← <a href="#" data-long="${esc(m.long)}" data-t="${m.start}">${esc(m.longTitle)} · ${dur(m.start)}–${dur(m.end)}</a>
+          <div class="muted">${esc(m.why)}</div><div class="muted">Kesilgan: ${esc(m.cut)} · Qo'shilgan: ${esc(m.added)}</div></div>`).join('')}</details>` : ''}
+      <details style="margin-top:6px"><summary class="small">Har bir Shorts tahlili</summary>
+        ${(g.analyses || []).map((x) => `<div class="small" style="margin:10px 0"><a href="#" data-src="${esc(x.id)}">▶ ${esc(x.title)} (${num(x.views)})</a>
+          <div>${esc(x.whatHappens)}</div><div><b>Nega qiziq:</b> ${esc(x.whyInteresting)}</div><div class="muted">Hook: ${esc(x.hook)} · Ovoz: ${esc(x.audio)} · Tuzilishi: ${esc(x.structure)}</div></div>`).join('')
+          || (g.sources || []).map((x) => `<a href="#" data-src="${esc(x.id)}" class="small">▶ ${esc(x.title)} (${num(x.views)})</a>`).join('<br>')}</details></div>`).join('')}`;
+}
+let stylePoll = null;
+function loadStyles() {
+  return api('/api/styles?v=2').then((d) => {
+    if (!here('stats') || !$('#styles')) return;
+    const open = [...document.querySelectorAll('#styles details')].map((x) => x.open);
+    $('#styles').innerHTML = stylesCard(d); bindStyles();
+    document.querySelectorAll('#styles details').forEach((x, i) => { x.open = !!open[i]; });
+    clearTimeout(stylePoll); if (d.running?.length) stylePoll = setTimeout(loadStyles, 8000);
+  }).catch(() => {});
 }
 function bindStyles() {
   document.querySelectorAll('[data-src]').forEach((a) => (a.onclick = (e) => { e.preventDefault(); ext('https://youtube.com/shorts/' + a.dataset.src); }));
+  document.querySelectorAll('[data-long]').forEach((a) => (a.onclick = (e) => { e.preventDefault(); ext(`https://youtu.be/${a.dataset.long}?t=${a.dataset.t}`); }));
   if ($('#stLearn')) $('#stLearn').onclick = async (e) => { const niche = $('#stNiche').value.trim(); if (!niche) return toast("Yo'nalishni yozing");
-    e.target.disabled = true; e.target.textContent = "Ko'rilmoqda…";
-    try { await api('/api/styles', { method: 'POST', body: { niche }, timeout: 300000 }); toast("✅ O'rganildi"); const l = await api('/api/styles'); $('#styles').innerHTML = stylesCard(l); bindStyles(); }
-    catch (er) { toast(er.message); e.target.disabled = false; e.target.textContent = "O'rganish"; } };
+    e.target.disabled = true;
+    try { await api('/api/styles', { method: 'POST', body: { niche } }); toast("O'rganish boshlandi — bir necha daqiqa oladi"); loadStyles(); }
+    catch (er) { toast(er.message); e.target.disabled = false; } };
 }
 function reloadGrowth() {
   api('/api/growth', { timeout: 60000 }).then((g) => { if (!here('stats') || !$('#growth')) return; growthHtml = growthCard(g); $('#growth').innerHTML = growthHtml; bindGrowth(); }).catch(() => {});
@@ -392,7 +415,7 @@ async function stats(silent) {
   for (const [k, el] of Object.entries(keep)) { const slot = $('#' + k); if (el && slot && el.childNodes.length) { slot.replaceWith(el); kept[k] = true; } }
   if (silent) window.scrollTo(0, scrollY);
   if (growthHtml && !kept.growth) bindGrowth();
-  if (!silent || !kept.styles) api('/api/styles').then((list) => { if (!here('stats') || !$('#styles')) return; $('#styles').innerHTML = stylesCard(list); bindStyles(); }).catch(() => {});
+  if (!silent || !kept.styles) loadStyles();
   if (!silent || !growthHtml || !kept.growth) api('/api/growth', { timeout: 60000 }).then((g) => { if (!here('stats') || !$('#growth')) return; growthHtml = growthCard(g); $('#growth').innerHTML = growthHtml; bindGrowth(); }).catch(() => {});
   barChart($('#c1'), s.series, 'views', "ko'rish");
   lineChart($('#c2'), s.subs, 'subscribers', 'obunachi');

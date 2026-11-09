@@ -111,6 +111,7 @@ function stats(days, sort = 'new') {
 }
 const getSecretSafe = (k) => { try { return require('./src/db').getSecret(k); } catch (e) { return null; } };
 
+let styleErr = null;
 // ---------- API router ----------
 async function api(req, res, url) {
   const p = url.pathname; const m = req.method;
@@ -234,13 +235,15 @@ async function api(req, res, url) {
     if (empty) await r;
     return send(res, 200, stats(Math.min(90, Math.max(7, Number(url.searchParams.get('days')) || 30)), url.searchParams.get('sort')));
   }
-  if (p === '/api/styles' && m === 'GET') return send(res, 200, require('./src/style').all());
+  if (p === '/api/styles' && m === 'GET') { const st = require('./src/style'); return send(res, 200, url.searchParams.get('v') === '2' ? { list: st.all(), running: st.status(), error: styleErr } : st.all()); }
   if (p === '/api/styles' && m === 'POST') {
     const niche = String(b.niche || '').trim().slice(0, 120); if (!niche) return send(res, 400, { error: 'Yo\'nalishni yozing (masalan: CS2)' });
     if (!yt.connected()) return send(res, 400, { error: 'YouTube kanal ulanmagan' });
-    const st = require('./src/style'); db.prepare('DELETE FROM style_guides WHERE key = ?').run(niche.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim());
-    let g; try { g = await st.learn(niche); } catch (e) { return send(res, 400, { error: e.message }); }
-    return g ? send(res, 200, g) : send(res, 400, { error: 'O\'rganib bo\'lmadi (mashhur Shorts topilmadi yoki Gemini ulanmagan)' });
+    // takes minutes (every Short is watched in full): runs in the background, the page shows the progress
+    const st = require('./src/style'); styleErr = null;
+    st.learn(niche, { force: true }).then((g) => { if (!g) styleErr = 'O\'rganib bo\'lmadi (Shorts topilmadi yoki Gemini ulanmagan)'; })
+      .catch((e) => { styleErr = e.message; });
+    return send(res, 200, { started: true });
   }
   if (p === '/api/growth' && m === 'GET') {
     const growth = require('./src/growth');
