@@ -11,6 +11,7 @@ const keyOf = (s) => String(s || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '
 
 // most-viewed Shorts of the niche from the last 90 days (YouTube Data API search: 100 quota units, once a week per niche)
 async function viralShorts(niche, max = 8) {
+  if (!require('./quota').canExtra('search')) throw new Error('Bugungi YouTube kvotasi yuklashlar uchun saqlangan — ertaga urinib ko\'ring');
   const after = new Date(Date.now() - 90 * 86400000).toISOString();
   const q = encodeURIComponent(`${niche} #shorts`);
   const s = await yt.apiGet(`search?part=snippet&type=video&videoDuration=short&order=viewCount&maxResults=15&publishedAfter=${after}&q=${q}`);

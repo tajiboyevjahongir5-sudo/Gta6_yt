@@ -41,6 +41,7 @@ const DEFAULTS = {
   autoPublish: false,          // false: each clip waits for your approval in the bot / web app
   privacy: 'public',           // public | unlisted | private
   publishTimes: ['13:00', '19:00'], // Tashkent time slots for scheduled uploads
+  quotaLimit: 10000,           // YouTube Data API units per day (10,000 unless Google raised it for your project)
   dailyLimit: 6,               // YouTube API quota allows ~6 uploads a day by default
   makeLong: true,              // compilation video (horizontal)
   makeShorts: true,            // vertical Shorts
@@ -56,6 +57,7 @@ const DEFAULTS = {
   defaultTags: ['highlights', 'best moments'],
   descriptionFooter: '🔔 Subscribe for the best moments every day!',
   accent: '#FFD400',           // thumbnail text colour
+  keepClipDays: 7,             // a published clip's video file is deleted from the server after this many days
   keepSource: false,           // delete downloaded stream after rendering
   useAI: true,
   learnStyle: true,            // study the most-viewed Shorts of each niche and edit like them (Gemini watches them)

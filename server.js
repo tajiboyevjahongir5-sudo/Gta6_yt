@@ -19,7 +19,10 @@ const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; ch
 
 // ---------- sessions: uid.exp.signature ----------
 const sign = (s) => crypto.createHmac('sha256', cfg.SECRET).update(s).digest('base64url');
-const makeToken = (uid) => { const body = `${uid}.${Date.now() + 30 * 86400000}`; return body + '.' + sign(body); };
+const makeToken = (uid, ms = 30 * 86400000) => { const body = `${uid}.${Date.now() + ms}`; return body + '.' + sign(body); };
+// media links carry their token in the URL (a <video> can't send headers), so they get a short-lived one that
+// opens files only, never the API
+const mediaToken = () => makeToken('m', 12 * 3600000);
 function checkToken(t) {
   const [uid, exp, sig] = String(t || '').split('.');
   if (!uid || !sig || Number(exp) < Date.now()) return null;
@@ -81,6 +84,7 @@ async function overview() {
       views: db.prepare("SELECT COALESCE(SUM(views),0) n FROM clips WHERE status = 'published'").get().n,
       sources: count('SELECT COUNT(*) n FROM sources WHERE active = 1'),
     },
+    quota: require('./src/quota').info(),
     active: db.prepare("SELECT * FROM jobs WHERE status IN ('downloading','analyzing','rendering') ORDER BY id LIMIT 3").all(),
     next: db.prepare("SELECT * FROM clips WHERE status = 'approved' ORDER BY scheduled_at LIMIT 3").all().map(clipView),
     logs: db.prepare('SELECT * FROM logs ORDER BY id DESC LIMIT 15').all(),
@@ -112,19 +116,27 @@ function stats(days, sort = 'new') {
 const getSecretSafe = (k) => { try { return require('./src/db').getSecret(k); } catch (e) { return null; } };
 
 let styleErr = null;
+const loginFails = new Map();
 // ---------- API router ----------
 async function api(req, res, url) {
   const p = url.pathname; const m = req.method;
   if (p === '/api/login' && m === 'POST') {
     const b = await readBody(req);
     const user = tg.verifyInitData(b.initData);
-    if (user && tg.isAdmin(user.id)) return send(res, 200, { token: makeToken(user.id), name: user.first_name });
-    if (cfg.WEBAPP_PASSWORD && b.password && b.password === cfg.WEBAPP_PASSWORD) return send(res, 200, { token: makeToken('web'), name: 'Admin' });
+    if (user && tg.isAdmin(user.id)) return send(res, 200, { token: makeToken(user.id), media: mediaToken(), name: user.first_name });
+    // password login: at most 8 wrong tries per address in 15 minutes, compared in constant time
+    const ip = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
+    const f = loginFails.get(ip) || { n: 0, at: 0 }; if (Date.now() - f.at > 15 * 60000) f.n = 0;
+    if (f.n >= 8) return send(res, 429, { error: 'Juda ko\'p urinish. 15 daqiqadan keyin qayta urinib ko\'ring' });
+    const pw = Buffer.from(String(b.password || '')), good = Buffer.from(String(cfg.WEBAPP_PASSWORD || ''));
+    if (good.length && pw.length === good.length && crypto.timingSafeEqual(pw, good)) { loginFails.delete(ip); return send(res, 200, { token: makeToken('web'), media: mediaToken(), name: 'Admin' }); }
+    if (b.password) loginFails.set(ip, { n: f.n + 1, at: Date.now() });
     if (user) return send(res, 403, { error: `Ruxsat yo'q. Telegram ID: ${user.id}. Uni ADMIN_IDS ga qo'shing.` });
     return send(res, 401, { error: 'Kirish uchun Telegram bot orqali oching yoki parol kiriting' });
   }
   const uid = checkToken((req.headers.authorization || '').replace(/^Bearer /, ''));
-  if (!uid) return send(res, 401, { error: 'Sessiya tugadi' });
+  if (!uid || uid === 'm') return send(res, 401, { error: 'Sessiya tugadi' });
+  if (p === '/api/media-token' && m === 'GET') return send(res, 200, { media: mediaToken() });
   // raw video upload (streamed to disk, no size limit besides the volume): PUT /api/upload?name=file.mp4
   if (p === '/api/upload' && m === 'PUT') {
     const name = String(url.searchParams.get('name') || 'video.mp4').replace(/[^\w.\- ]+/g, '_').slice(-80);

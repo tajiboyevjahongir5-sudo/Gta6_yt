@@ -7,6 +7,7 @@ const ai = require('./ai');
 const tg = require('./telegram');
 
 const DAY = 86400000;
+const MIN_MATURE = 15, MATURE_HOURS = 48; // Shorts older than 2 days needed before the analysis may change the editing
 const iso = (t) => new Date(t).toISOString().slice(0, 10);
 const LANG = { uz: "Uzbek (Latin script)", ru: 'Russian', en: 'English' };
 
@@ -20,6 +21,10 @@ async function replyComments({ force = false } = {}) {
     const me = (await yt.channelInfo())?.id;
     const used = db.prepare('SELECT COUNT(*) n FROM comment_replies WHERE skipped = 0 AND at > ?').get(Date.now() - DAY).n;
     let budget = Math.max(0, (s.repliesPerDay || 25) - used);
+    // replies only from the quota that is left after today's uploads are paid for (a reply = 50 units)
+    const quota = require('./quota');
+    while (budget > 0 && !quota.canExtra('reply', budget)) budget--;
+    if (!budget && (s.repliesPerDay || 25) - used > 0) return { replied: 0, reason: 'YouTube kvotasi yuklashlar uchun saqlandi' };
     if (!budget) return { replied: 0, reason: 'kunlik limit' };
     // newest videos first: that's where people talk and where a quick answer helps the most
     const vids = db.prepare('SELECT id, title FROM channel_videos WHERE published > ? ORDER BY published DESC LIMIT 15').all(Date.now() - 45 * DAY);
@@ -147,11 +152,16 @@ async function analyze() {
     const rep = { ...r.data, at: now, monetization: mon, analytics: !!per.rows, analyticsError: per.error || null, videos: vids.length };
     rep.lessons = (rep.lessons || []).slice(0, 8);
     setSecret('growthReport', rep);
-    if (s.autoTune && rep.idealShortSeconds >= 20 && rep.idealShortSeconds <= 58) setSettings({ shortTarget: Math.max(30, Math.round(rep.idealShortSeconds)) });
+    // Conclusions from a handful of fresh videos are noise. The bot only changes its own editing (Shorts length,
+    // lessons for the moment picker) once there are enough Shorts that had time to collect views.
+    const mature = vids.filter((v) => v.duration <= 180 && now - v.published >= MATURE_HOURS * 3600000).length;
+    rep.mature = mature; rep.needed = MIN_MATURE; rep.applied = mature >= MIN_MATURE;
+    setSecret('growthReport', rep);
+    if (s.autoTune && rep.applied && rep.idealShortSeconds >= 20 && rep.idealShortSeconds <= 58) setSettings({ shortTarget: Math.max(30, Math.round(rep.idealShortSeconds)) });
     log('Kanal tahlili tayyor: ' + rep.summary.slice(0, 160));
     await tg.notifyAdmins(`📈 <b>Kunlik tahlil</b>\n${tg.escHtml(rep.summary)}\n\n` +
       rep.diagnosis.slice(0, 3).map((d) => `• <b>${tg.escHtml(d.problem)}</b> → ${tg.escHtml(d.fix)}`).join('\n') +
-      `\n\nKeyingi montajlarda hisobga olinadi. To'liq: Panel → Statistika`);
+      (rep.applied ? `\n\nKeyingi montajlarda hisobga olinadi.` : `\n\nℹ️ Ma'lumot hali kam (${mature}/${MIN_MATURE} ta 2 kundan eski Shorts): montaj sozlamalari o'zgartirilmadi.`) + ` To'liq: Panel → Statistika`);
     return rep;
   })().finally(() => { analyzing = null; });
   return analyzing;
@@ -160,7 +170,7 @@ async function analyze() {
 // lessons for the AI that picks moments and writes titles (src/ai.js rankAndDescribe)
 function lessons() {
   const s = getSettings(); const r = getSecret('growthReport');
-  return s.autoTune && r?.lessons?.length && Date.now() - r.at < 14 * DAY ? r.lessons : [];
+  return s.autoTune && r?.applied && r?.lessons?.length && Date.now() - r.at < 14 * DAY ? r.lessons : [];
 }
 
 function start(every) {

@@ -41,7 +41,7 @@ let token = localStorage.getItem('lahza_token') || '';
 async function login(password) {
   const r = await fetch('/api/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ initData: tg?.initData || '', password }) });
   const j = await r.json(); if (!r.ok) throw new Error(j.error);
-  token = j.token; localStorage.setItem('lahza_token', token);
+  token = j.token; localStorage.setItem('lahza_token', token); setMedia(j.media);
 }
 async function api(path, opts = {}) {
   const ctl = new AbortController(); const to = setTimeout(() => ctl.abort(), opts.timeout || 25000);
@@ -60,7 +60,12 @@ function showLogin(msg) {
     <label class="f">Parol (WEBAPP_PASSWORD)</label><input type="password" id="pw"><br><br><button class="btn primary" id="go">Kirish</button></div>`;
   $('#go').onclick = async () => { try { await login($('#pw').value); go(page); } catch (e) { toast(e.message); } };
 }
-const media = (id, kind) => `/media/clip/${id}/${kind}?t=${encodeURIComponent(token)}`;
+// media URLs use a short-lived, files-only token (the URL may be copied or logged), refreshed while the app is open
+let mediaTok = localStorage.getItem('lahza_media') || '';
+const setMedia = (t) => { if (t) { mediaTok = t; localStorage.setItem('lahza_media', t); } };
+const refreshMedia = () => api('/api/media-token').then((r) => setMedia(r.media)).catch(() => {});
+setInterval(refreshMedia, 6 * 3600000);
+const media = (id, kind) => `/media/clip/${id}/${kind}?t=${encodeURIComponent(mediaTok || token)}`;
 
 // ---------- router ----------
 let page = 'home', timer = null, busy = false;
@@ -105,7 +110,7 @@ async function home() {
       <div class="tile"><div class="v">${ch ? num(ch.subscribers) : '—'}</div><div class="l">Obunachilar</div></div>
       <div class="tile"><div class="v">${ch ? num(ch.views) : num(o.counts.views)}</div><div class="l">Jami ko'rishlar</div></div>
       <div class="tile"><div class="v">${o.counts.published}</div><div class="l">Yuklangan kliplar</div></div>
-      <div class="tile"><div class="v">${o.counts.todayUploads}<span class="muted" style="font-size:15px">/${o.counts.dailyLimit}</span></div><div class="l">Bugun yuklandi</div></div>
+      <div class="tile"><div class="v">${o.counts.todayUploads}<span class="muted" style="font-size:15px">/${o.counts.dailyLimit}</span></div><div class="l">Bugun yuklandi${o.quota ? ` · API ${Math.round(o.quota.used / o.quota.limit * 100)}%` : ''}</div></div>
       <div class="tile" data-go="jobs"><div class="v">${o.counts.queue}</div><div class="l">Navbatda ›</div></div>
       <div class="tile" data-go="clips"><div class="v">${o.counts.drafts}</div><div class="l">Tasdiq kutmoqda ›</div></div>
     </div>
@@ -376,6 +381,7 @@ function openAnalysis() {
         ${r.diagnosis.map((d) => `<div style="margin:8px 0"><b>⚠️ ${esc(d.problem)}</b><div class="small muted">${esc(d.evidence)}</div><div class="small">✅ ${esc(d.fix)}</div></div>`).join('')}
         ${r.lessons.length ? `<b>Keyingi montajlarda qo'llanadi</b><ul class="small">${r.lessons.map((l) => `<li>${esc(l)}</li>`).join('')}</ul>` : ''}
         <div class="small muted">Shorts uzunligi: ~${Math.round(r.idealShortSeconds)} s</div>
+        ${r.applied === false ? `<div class="warnbox" style="margin-top:8px">Ma'lumot hali kam: ${r.mature}/${r.needed} ta 2 kundan eski Shorts. Bu xulosalar hozircha faqat ma'lumot uchun — montaj sozlamalari o'zgartirilmaydi.</div>` : ''}
         ${r.monetizationPlan?.length ? `<b>Monetizatsiyaga tezroq chiqish rejasi</b><ol class="small">${r.monetizationPlan.map((l) => `<li>${esc(l)}</li>`).join('')}</ol>` : ''}`;
   $('#sheet').classList.remove('hidden'); $('#x').onclick = closeSheet;
 }
@@ -713,4 +719,4 @@ function openCookies() {
   $('#ckDel').onclick = async () => { await api('/api/cookies', { method: 'DELETE' }); toast('O\'chirildi'); closeSheet(); settings(); };
 }
 
-(async () => { try { if (!token) await login(); go('home'); } catch (e) { showLogin(e.message); } })();
+(async () => { try { if (!token) await login(); else await refreshMedia(); go('home'); } catch (e) { showLogin(e.message); } })();

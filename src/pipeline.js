@@ -81,6 +81,42 @@ function cleanOldSources() {
 }
 // videos uploaded straight from the phone/computer (no YouTube download at all)
 const UPLOAD_DIR = path.join(DATA_DIR, 'uploads');
+// one copy of the database a day (settings, YouTube/AI keys, clip history), the last 7 kept
+function backupDb() {
+  try {
+    const dir = path.join(DATA_DIR, 'backup'); fs.mkdirSync(dir, { recursive: true });
+    const f = path.join(dir, `lahza-${dayKey()}.db`);
+    if (fs.existsSync(f)) return;
+    db.exec(`VACUUM INTO '${f.replace(/'/g, "''")}'`);
+    for (const old of fs.readdirSync(dir).filter((x) => /^lahza-.*\.db$/.test(x)).sort().slice(0, -7)) fs.rmSync(path.join(dir, old), { force: true });
+  } catch (e) { log('Baza nusxasi olinmadi: ' + e.message.slice(0, 120), 'warn'); }
+}
+// Disk hygiene. Clip files are only needed until they are on YouTube (plus a few days to re-check them):
+//  - published clips: video + preview deleted after keepClipDays (the thumbnail and the YouTube link stay)
+//  - rejected clips: everything after 3 days
+//  - forgotten uploads and work folders of jobs that are not running: after 3 days
+function cleanOldFiles() {
+  const s = getSettings(); const DAY = 86400000; const now = Date.now(); let freed = 0;
+  const rm = (f) => { try { if (f && fs.existsSync(f)) { freed += fs.statSync(f).size; fs.rmSync(f, { force: true }); } } catch (e) {} };
+  const prev = (f) => (f ? f.replace(/\.mp4$/i, '') + '.preview.mp4' : null);
+  for (const c of db.prepare("SELECT id, file FROM clips WHERE status = 'published' AND published_at < ? AND file IS NOT NULL").all(now - (s.keepClipDays || 7) * DAY)) {
+    rm(c.file); rm(prev(c.file));
+  }
+  for (const c of db.prepare("SELECT id, file, thumb FROM clips WHERE status = 'rejected' AND created_at < ?").all(now - 3 * DAY)) {
+    rm(c.file); rm(prev(c.file)); rm(c.thumb);
+  }
+  const old = (p) => { try { return now - fs.statSync(p).mtimeMs > 3 * DAY; } catch (e) { return false; } };
+  if (fs.existsSync(UPLOAD_DIR)) {
+    const inUse = new Set(db.prepare("SELECT url FROM jobs WHERE status IN ('queued','downloading','analyzing','rendering','waiting') AND url LIKE 'upload:%'").all().map((j) => j.url.slice(7)));
+    for (const f of fs.readdirSync(UPLOAD_DIR)) if (!inUse.has(f) && old(path.join(UPLOAD_DIR, f))) rm(path.join(UPLOAD_DIR, f));
+  }
+  if (fs.existsSync(WORK_DIR)) {
+    const active = new Set(db.prepare("SELECT id FROM jobs WHERE status IN ('queued','downloading','analyzing','rendering','waiting')").all().map((j) => String(j.id)));
+    for (const d of fs.readdirSync(WORK_DIR)) { const p = path.join(WORK_DIR, d); if (!active.has(d) && old(p)) { try { fs.rmSync(p, { recursive: true, force: true }); } catch (e) {} } }
+  }
+  if (freed > 50 * 1048576) log(`Disk tozalandi: ${Math.round(freed / 1048576)} MB bo'shatildi (eski kliplar)`);
+  return freed;
+}
 function saveCookies(text) {
   text = String(text || '').replace(/\r/g, '');
   const lines = text.split('\n').filter((l) => l.split('\t').length >= 7);
@@ -190,8 +226,18 @@ async function download(job, dir, quality, allowLow = false) {
   if (kept) {
     const dest = path.join(dir, 'source.mp4'); fs.renameSync(kept.file, dest);
     log(`#${job.id}: saqlangan manba ishlatildi (qayta yuklab olinmadi)`);
+    try { fs.writeFileSync(path.join(dir, 'resume.json'), JSON.stringify({ file: 'source.mp4', meta: kept.info.meta, transcript: kept.info.transcript || '' })); } catch (e) {}
     return { file: dest, meta: kept.info.meta, transcript: kept.info.transcript || '' };
   }
+  // interrupted run (restart / new deploy): the source is still in the work folder -> no second download
+  const rs = path.join(dir, 'resume.json');
+  if (fs.existsSync(rs)) {
+    try { const r = JSON.parse(fs.readFileSync(rs, 'utf8'));
+      if (r.file && fs.existsSync(path.join(dir, r.file)) && fs.statSync(path.join(dir, r.file)).size > 1000) {
+        log(`#${job.id}: manba qayta yuklab olinmadi (ish papkasida bor)`);
+        return { file: path.join(dir, r.file), meta: r.meta, transcript: r.transcript || '' }; } } catch (e) { /* download again */ }
+  }
+  const remember = (res) => { try { fs.writeFileSync(rs, JSON.stringify({ file: path.basename(res.file), meta: res.meta, transcript: res.transcript })); } catch (e) {} return res; };
   if (job.url.startsWith('upload:')) {
     const f = path.join(UPLOAD_DIR, path.basename(job.url.slice(7)));
     if (!fs.existsSync(f)) throw new Error('Yuklangan fayl topilmadi, qaytadan yuklang');
@@ -200,7 +246,7 @@ async function download(job, dir, quality, allowLow = false) {
     const title = (job.title || path.basename(f)).replace(/^\d+-/, '').replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ');
     const meta = { title, description: '', tags: [], categories: [], channel: '', duration: null, chapters: [] };
     setJob(job.id, { title, meta });
-    return { file: dest, meta, transcript: '' };
+    return remember({ file: dest, meta, transcript: '' });
   }
   const state = {};
   const { out } = await ytdlp(['--dump-single-json', '--no-playlist', '--no-warnings', job.url], { timeoutMs: 120000 }, state);
@@ -247,7 +293,7 @@ async function download(job, dir, quality, allowLow = false) {
   const file = fs.readdirSync(dir).find((f) => f.startsWith('source.') && /\.(mp4|mkv|webm)$/.test(f));
   if (!file) throw new Error('Video yuklab olinmadi');
   const transcript = await fetchTranscript(job.url, dir, state);
-  return { file: path.join(dir, file), meta: keep, transcript };
+  return remember({ file: path.join(dir, file), meta: keep, transcript });
 }
 
 // YouTube's own captions (manual or auto) as plain text — cheap way for the AI to "hear" the whole video
@@ -293,17 +339,10 @@ function chooseMoments(candidates, aiRes, settings) {
 
 function creditLine(job) { return job.author ? `🎬 Original video: ${job.author}${job.url ? ' — ' + job.url : ''}` : ''; }
 
-async function processJob(job) {
-  const settings = getSettings();
-  const dir = path.join(WORK_DIR, String(job.id)); fs.mkdirSync(dir, { recursive: true });
-  const outDir = path.join(OUT_DIR, String(job.id)); fs.mkdirSync(outDir, { recursive: true });
-
-  setJob(job.id, { status: 'downloading', step: 'Yuklab olinmoqda', progress: 0, error: null });
-  const { file: src, meta, transcript } = await download(job, dir, settings.quality, settings.lowQualityFallback);
-  job = db.prepare('SELECT * FROM jobs WHERE id = ?').get(job.id);
-  const source = job.source_id ? db.prepare('SELECT * FROM sources WHERE id = ?').get(job.source_id) : null;
-  if (source?.credit) job.author = source.credit;
-
+// everything that is expensive to find out about a source (loudness/motion scan, the AI listening to the audio, webcam,
+// reactions, the AI ranking). Its result is saved in the job's work folder, so a restart in the middle of a job
+// (a new deploy) continues from the montage instead of spending the time and the AI quota again.
+async function analyzeSource(job, src, dir, settings, meta, transcript) {
   setJob(job.id, { status: 'analyzing', step: 'Qiziq lahzalar qidirilmoqda', progress: 0 });
   const hl = await findHighlights(src, { count: settings.highlightCount, before: settings.clipBefore, after: settings.clipAfter },
     (p) => setJob(job.id, { progress: p }));
@@ -376,6 +415,34 @@ async function processJob(job) {
     if (aiRes) setJob(job.id, { step: `AI: ${aiRes.provider === 'gemini' ? 'Gemini' : 'Claude'}` });
     candidates.length = cands.length;
   }
+  return { info, score, candidates, aiRes, facecam };
+}
+
+async function processJob(job) {
+  const settings = getSettings();
+  const dir = path.join(WORK_DIR, String(job.id)); fs.mkdirSync(dir, { recursive: true });
+  const outDir = path.join(OUT_DIR, String(job.id)); fs.mkdirSync(outDir, { recursive: true });
+
+  setJob(job.id, { status: 'downloading', step: 'Yuklab olinmoqda', progress: 0, error: null });
+  const { file: src, meta, transcript } = await download(job, dir, settings.quality, settings.lowQualityFallback);
+  job = db.prepare('SELECT * FROM jobs WHERE id = ?').get(job.id);
+  const source = job.source_id ? db.prepare('SELECT * FROM sources WHERE id = ?').get(job.source_id) : null;
+  if (source?.credit) job.author = source.credit;
+
+  const ckFile = path.join(dir, 'analysis.json');
+  let an = null, resumed = false;
+  try { if (fs.existsSync(ckFile)) { an = JSON.parse(fs.readFileSync(ckFile, 'utf8')); resumed = true; } } catch (e) { an = null; }
+  if (resumed) {
+    log(`#${job.id}: uzilgan joydan davom etmoqda (tahlil saqlangan)`);
+    // drafts of the interrupted run are made again; clips already approved / uploaded are kept and not re-rendered
+    for (const c of db.prepare("SELECT * FROM clips WHERE job_id = ? AND status = 'draft'").all(job.id)) for (const f of [c.thumb]) if (f) fs.rmSync(f, { force: true });
+    db.prepare("DELETE FROM clips WHERE job_id = ? AND status = 'draft'").run(job.id);
+  } else {
+    an = await analyzeSource(job, src, dir, settings, meta, transcript);
+    try { fs.writeFileSync(ckFile, JSON.stringify(an)); } catch (e) { /* only a shortcut */ }
+  }
+  const { info, score, aiRes, facecam } = an; const candidates = an.candidates;
+  const kept = (file) => resumed && !!db.prepare("SELECT id FROM clips WHERE job_id = ? AND file = ? AND status IN ('published','uploading','approved')").get(job.id, file);
   const tpl = ai.templateMeta({ source: job, settings, count: settings.highlightCount, meta });
   const video = aiRes?.video || tpl.video;
   setJob(job.id, { meta: { ...meta, subject: video.subject, summary: video.summary } });
@@ -393,7 +460,9 @@ async function processJob(job) {
   const long = aiRes?.long || tpl.long;
   const tags = [...(long.tags || []), video.subject, ...settings.defaultTags].filter(Boolean);
   const created = [];
-  const status = settings.autoPublish ? 'approved' : 'draft';
+  // a watched channel without the "author allowed clipping" mark never publishes by itself: its clips wait for you
+  const needsOk = !!(source && !source.permission);
+  const status = settings.autoPublish && !needsOk ? 'approved' : 'draft';
   const ins = db.prepare(`INSERT INTO clips (job_id, kind, file, thumb, segments, duration, score, title, description, tags, thumb_text, status, privacy, created_at, category)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '${String(video.categoryId || '24').replace(/\D/g, '')}')`);
 
@@ -407,7 +476,7 @@ async function processJob(job) {
   setJob(job.id, { status: 'rendering', step: 'Montaj qilinmoqda', progress: 0 });
   const totalSteps = (settings.makeLong ? 1 : 0) + (settings.makeShorts ? Math.min(settings.shortsPerVideo, picked.length) : 0) || 1;
   let done = 0;
-  if (settings.makeLong && picked.length >= 3) {
+  if (settings.makeLong && picked.length >= 3 && !kept(path.join(outDir, 'compilation.mp4'))) {
     const out = path.join(outDir, 'compilation.mp4');
     await render.renderCompilation(src, picked, out, dir, (p) => setJob(job.id, { progress: (done + p) / totalSteps }), { effects: settings.effects, emojis: settings.emojis, zoom: settings.zoom, outro });
     const ordered = [...picked].sort((a, b) => a.start - b.start);
@@ -423,6 +492,7 @@ async function processJob(job) {
     for (let i = 0; i < Math.min(settings.shortsPerVideo, picked.length); i++) {
       const m = picked[i]; const title = m.shortTitle || tpl.shortTitle(i);
       const out = path.join(outDir, `short_${i + 1}.mp4`); const thumb = path.join(outDir, `short_${i + 1}.jpg`);
+      if (kept(out)) { done++; continue; }
       const peak = m.peak ?? (m.start + m.end) / 2;
       const asr = { model: settings.asrModel, lang: settings.subtitleLang, to: settings.language,
         context: { title: meta.title || job.title, subject: video.subject, terms: [...new Set([video.subject, ...(meta.tags || []), ...(video.hashtags || [])].filter(Boolean))] } };
@@ -494,7 +564,8 @@ async function processJob(job) {
   fs.rmSync(dir, { recursive: true, force: true });
   setJob(job.id, { status: 'done', step: `${created.length} ta klip tayyor`, progress: 1 });
   log(`#${job.id} tayyor: ${created.length} ta klip (${job.title || job.url})`);
-  if (settings.autoPublish) for (const id of created) scheduleClip(id);
+  if (needsOk) for (const id of created) updateRow('clips', id, { error: `"${source.name}" kanali uchun muallif ruxsati belgilanmagan. Ruxsat bo'lsa Manbalar'da "Ruxsat bor" ni bosing; bo'lmasa bu klipni yuklamang — mualliflik shikoyati (strike) kanalga zarar qiladi.` });
+  if (settings.autoPublish && !needsOk) for (const id of created) scheduleClip(id);
   for (const id of created) await announceClip(id);
 }
 
@@ -538,7 +609,7 @@ async function announceClip(id) {
   const c = parseClip(db.prepare('SELECT * FROM clips WHERE id = ?').get(id)); if (!c) return;
   const kind = c.kind === 'short' ? '📱 Shorts' : '🎬 Kompilyatsiya';
   const when = c.scheduled_at ? `\n🗓 Yuklanadi: ${new Date(c.scheduled_at + TZ_OFFSET).toISOString().slice(5, 16).replace('T', ' ')}` : '';
-  const caption = `${kind} • ${fmtTime(c.duration)}\n<b>${tg.escHtml(c.title)}</b>${when}`;
+  const caption = `${kind} • ${fmtTime(c.duration)}\n<b>${tg.escHtml(c.title)}</b>${when}${c.status === 'draft' && c.error ? '\n\n⚠️ ' + tg.escHtml(c.error) : ''}`;
   const kb = c.status === 'draft' ? { inline_keyboard: [[{ text: '✅ Tasdiqlash', callback_data: 'ok:' + id }, { text: '🚀 Hozir yuklash', callback_data: 'now:' + id }],
     [{ text: '❌ Rad etish', callback_data: 'no:' + id }]] } : undefined;
   await tg.sendPhotoToAdmins(c.thumb, caption, kb);
@@ -739,7 +810,8 @@ async function uploaderLoop() {
       if (yt.connected()) {
         const s = getSettings();
         const today = db.prepare("SELECT COUNT(*) n FROM clips WHERE published_at >= ?").get(Date.parse(dayKey() + 'T00:00:00Z') - TZ_OFFSET).n;
-        const c = today < s.dailyLimit && db.prepare("SELECT * FROM clips WHERE status = 'approved' AND (scheduled_at IS NULL OR scheduled_at <= ?) ORDER BY scheduled_at LIMIT 1").get(Date.now());
+        // an upload needs 1,650 quota units: if today's are spent, wait for the reset instead of failing the clip
+        const c = today < s.dailyLimit && require('./quota').canUpload() && db.prepare("SELECT * FROM clips WHERE status = 'approved' AND (scheduled_at IS NULL OR scheduled_at <= ?) ORDER BY scheduled_at LIMIT 1").get(Date.now());
         if (c) { await uploadClip(parseClip(c)); continue; }
       }
     } catch (e) { log('Yuklovchi xatosi: ' + e.message, 'error'); }
@@ -753,8 +825,8 @@ function start() {
   every(20 * 60000, checkSources);
   every(3 * 3600000, refreshStats);
   every(10 * 60000, () => refreshChannel(5 * 60000));
-  every(3600000, async () => cleanOldSources());
+  every(3600000, async () => { cleanOldSources(); cleanOldFiles(); backupDb(); });
   require('./growth').start(every);
 }
 
-module.exports = { proxyUrl, normalizeProxy, testProxy, setProxy, redoJob, removeKeptSource, refreshChannel, channelRefreshState, COOKIES, UPLOAD_DIR, saveCookies, start, addJob, addSource, checkSources, scheduleClip, refreshStats, announceClip, chooseMoments, normalizeSourceUrl, kick };
+module.exports = { cleanOldFiles, proxyUrl, normalizeProxy, testProxy, setProxy, redoJob, removeKeptSource, refreshChannel, channelRefreshState, COOKIES, UPLOAD_DIR, saveCookies, start, addJob, addSource, checkSources, scheduleClip, refreshStats, announceClip, chooseMoments, normalizeSourceUrl, kick };

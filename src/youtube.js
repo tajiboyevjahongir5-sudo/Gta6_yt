@@ -70,10 +70,14 @@ const hasScope = (name) => (getSecret('yt')?.scope || '').split(' ').includes('h
 function disconnect() { setSecret('yt', null); setSecret('channel', null); }
 
 async function api(pathAndQuery, opts = {}) {
+  const quota = require('./quota');
   const r = await fetch('https://www.googleapis.com/youtube/v3/' + pathAndQuery, { ...opts,
     headers: { authorization: 'Bearer ' + (await accessToken()), ...(opts.headers || {}) } });
+  // count the units this call costs (search 100, any write 50, reads 1)
+  const write = opts.method && opts.method !== 'GET';
+  quota.spend(/^search\?/.test(pathAndQuery) ? 'search' : /^comments\?/.test(pathAndQuery) && write ? 'reply' : write ? 'write' : 'read');
   const j = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(`YouTube API ${r.status}: ${j.error?.message || ''}`);
+  if (!r.ok) { if (/quota/i.test(j.error?.message || '')) quota.exhausted(); throw new Error(`YouTube API ${r.status}: ${j.error?.message || ''}`); }
   return j;
 }
 
@@ -101,7 +105,8 @@ async function upload({ file, title, description, tags, privacy = 'public', publ
     method: 'POST', body: JSON.stringify(meta),
     headers: { authorization: 'Bearer ' + (await accessToken()), 'content-type': 'application/json; charset=UTF-8',
       'x-upload-content-length': String(size), 'x-upload-content-type': 'video/mp4' } });
-  if (!init.ok) { const j = await init.json().catch(() => ({})); throw new Error(`Yuklashni boshlab bo'lmadi ${init.status}: ${j.error?.message || ''}`); }
+  if (!init.ok) { const j = await init.json().catch(() => ({})); if (/quota/i.test(j.error?.message || '')) require('./quota').exhausted(); throw new Error(`Yuklashni boshlab bo'lmadi ${init.status}: ${j.error?.message || ''}`); }
+  require('./quota').spend('upload');
   const location = init.headers.get('location');
   const put = await fetch(location, { method: 'PUT', duplex: 'half', body: Readable.toWeb(fs.createReadStream(file)),
     headers: { 'content-length': String(size), 'content-type': 'video/mp4' } });
@@ -120,6 +125,7 @@ function fitTags(tags) {
 }
 
 async function setThumbnail(videoId, jpg) {
+  require('./quota').spend('thumbnail');
   const r = await fetch('https://www.googleapis.com/upload/youtube/v3/thumbnails/set?videoId=' + videoId, {
     method: 'POST', body: fs.readFileSync(jpg), headers: { authorization: 'Bearer ' + (await accessToken()), 'content-type': 'image/jpeg' } });
   if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(`Prevyu o'rnatilmadi ${r.status}: ${j.error?.message || ''} (kanal telefon orqali tasdiqlanganmi?)`); }
