@@ -74,7 +74,7 @@ async function cutSegmentRaw(src, seg, out, { width = 1920, height = 1080, label
     (g && g.filter ? ';' + g.filter : '');
   await run(FFMPEG, ['-y', '-hide_banner', '-loglevel', 'error', '-ss', String(seg.start), '-t', dur.toFixed(2), '-i', src, ...au.inputs, ...(g ? g.inputs : []),
     '-filter_complex', fc, '-map', `[${g ? g.vOut : 'v0'}]`, '-map', `[${g ? g.aOut : 'a0'}]`, '-t', dur.toFixed(2),
-    '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-maxrate', '16M', '-bufsize', '32M', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '160k', '-ac', '2', '-ar', '48000', out]);
+    '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-maxrate', '16M', '-bufsize', '32M', '-pix_fmt', 'yuv420p', '-r', String(FPS), '-level:v', '4.1', '-c:a', 'aac', '-b:a', '160k', '-ac', '2', '-ar', '48000', out]);
 }
 
 async function concat(parts, out, workDir) {
@@ -114,7 +114,7 @@ async function renderOutro(lastPart, out, workDir, { channel = '', topic = '', l
   fc += `;[${ai}:a]anull[an]` + (g.filter ? ';' + g.filter : '') +
     `;[${g.vOut}]fade=t=in:st=0:d=0.4,fade=t=out:st=${D - 0.8}:d=0.8,fps=${FPS},format=yuv420p[vo];[${g.aOut}]afade=t=out:st=${D - 0.8}:d=0.8[ao]`;
   await run(FFMPEG, ['-y', '-hide_banner', '-loglevel', 'error', ...inputs, ...g.inputs, '-filter_complex', fc, '-map', '[vo]', '-map', '[ao]', '-t', String(D),
-    '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-maxrate', '16M', '-bufsize', '32M', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '160k', '-ac', '2', '-ar', '48000', out]);
+    '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-maxrate', '16M', '-bufsize', '32M', '-pix_fmt', 'yuv420p', '-r', String(FPS), '-level:v', '4.1', '-c:a', 'aac', '-b:a', '160k', '-ac', '2', '-ar', '48000', out]);
 }
 
 // horizontal compilation: segments in chronological order, numbered captions
@@ -256,7 +256,7 @@ async function renderShortRaw(src, seg, out, workDir, { words = [], accent = '#F
   fc += `;[${a}]highpass=f=70,acompressor=threshold=0.125:ratio=2.5:attack=15:release=200:makeup=1.5,equalizer=f=3000:t=q:w=1.2:g=3,loudnorm=I=-14:TP=-1.5:LRA=11,aresample=48000,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[aout]`;
   await run(FFMPEG, ['-y', '-hide_banner', '-loglevel', 'error', '-ss', String(seg.start), '-t', span.toFixed(2), '-i', src, ...au.inputs, ...inputs,
     '-filter_complex', fc, '-map', `[${v}]`, '-map', '[aout]', '-t', dur.toFixed(2),
-    '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-maxrate', '16M', '-bufsize', '32M', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '160k', '-ac', '2', '-ar', '48000', '-movflags', '+faststart', out]);
+    '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-maxrate', '16M', '-bufsize', '32M', '-pix_fmt', 'yuv420p', '-r', String(FPS), '-level:v', '4.1', '-c:a', 'aac', '-b:a', '160k', '-ac', '2', '-ar', '48000', '-movflags', '+faststart', out]);
 }
 
 // 1280x720 thumbnail: punchy frame, darkened bottom, huge outlined text
@@ -299,7 +299,7 @@ async function addHook(file, peakOut, workDir, { len = 1.3 } = {}) {
     `[a0]aformat=sample_rates=48000:channel_layouts=stereo[a1];[a1][w]amix=inputs=2:duration=first:normalize=0[a]`;
   await run(FFMPEG, ['-y', '-hide_banner', '-loglevel', 'error', '-ss', a.toFixed(2), '-t', String(len), '-i', file, '-i', file, '-i', whoosh,
     '-filter_complex', fc, '-map', '[v]', '-map', '[a]',
-    '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-maxrate', '16M', '-bufsize', '32M', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '160k', '-ac', '2', '-ar', '48000', '-movflags', '+faststart', tmp]);
+    '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-maxrate', '16M', '-bufsize', '32M', '-pix_fmt', 'yuv420p', '-r', String(FPS), '-level:v', '4.1', '-c:a', 'aac', '-b:a', '160k', '-ac', '2', '-ar', '48000', '-movflags', '+faststart', tmp]);
   fs.renameSync(tmp, file);
   return true;
 }
@@ -322,7 +322,7 @@ async function diagnose(file) {
     if (out.vcodec !== 'h264') bad.push('video kodek ' + out.vcodec);
     if (out.pix && out.pix !== 'yuv420p') bad.push('rang formati ' + out.pix);
     if (/High 10|4:4:4|4:2:2/i.test(out.profile || '')) bad.push('profil ' + out.profile);
-    if (out.level > 42) bad.push('level ' + out.level);
+    if (out.level > 42) bad.push(`H.264 level ${(out.level / 10).toFixed(1)} (iPhone 4.2 gacha ochadi)`);
     if (out.acodec && out.acodec !== 'aac') bad.push('audio ' + out.acodec);
     if (!out.indexAtStart) bad.push('indeks fayl oxirida');
     if (out.duration < 2) bad.push('davomiylik ' + out.duration + ' s');
