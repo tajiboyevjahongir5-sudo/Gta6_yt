@@ -483,6 +483,7 @@ if (require.main === module) {
     log(`Lahza ishga tushdi: http://localhost:${cfg.PORT}`);
     checkTools();
     startPotServer();
+    require('./src/warp').start();
     pipeline.start();
     tg.startPolling(botHandlers);
   });

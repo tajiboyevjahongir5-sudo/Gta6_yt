@@ -35,9 +35,9 @@ async function testProxy(u) {
   return { ok: true, ms: Date.now() - t0, best };
 }
 function setProxy(u) { require('./db').setSecret('ytProxy', u || null); log(u ? 'YouTube proxy saqlandi' : 'YouTube proxy o\'chirildi'); }
-function ytArgs(useCookies = true) {
+function ytArgs(useCookies = true, warp = false) {
   // optional proxy (a residential proxy gets past YouTube's block on data-centre IPs), e.g. http://user:pass@host:port
-  const px = proxyUrl(); const proxy = px ? ['--proxy', px] : [];
+  const px = proxyUrl() || (warp ? require('./warp').url() : ''); const proxy = px ? ['--proxy', px] : [];
   if (!useCookies || !fs.existsSync(COOKIES)) return proxy;
   fs.copyFileSync(COOKIES, COOKIES_RUN);
   return [...proxy, '--cookies', COOKIES_RUN];
@@ -164,12 +164,20 @@ async function ytdlp(args, opts, state) {
   if (!state.cookies) tries.push({ c: false, alt: false });
   if (fs.existsSync(COOKIES)) tries.push({ c: true, alt: false });
   tries.push({ c: fs.existsSync(COOKIES), alt: true });
+  // still blocked and no proxy of your own: the same once more through Cloudflare WARP (free, often let through)
+  if (!proxyUrl() && require('./warp').available()) {
+    tries.push({ c: false, alt: false, w: true });
+    if (fs.existsSync(COOKIES)) tries.push({ c: true, alt: false, w: true });
+    tries.push({ c: fs.existsSync(COOKIES), alt: true, w: true });
+  }
   let last;
   for (const t of tries) {
     if (state.alt && !t.alt) continue;
+    if (state.warp && !t.w) continue;
     try {
-      const r = await runYt([...ytArgs(t.c), ...(t.alt ? ALT_CLIENTS : []), ...args], opts);
-      state.cookies = t.c; state.alt = t.alt;
+      const r = await runYt([...ytArgs(t.c, t.w), ...(t.alt ? ALT_CLIENTS : []), ...args], opts);
+      if (t.w && !state.warp) log('YouTube: Cloudflare WARP orqali o\'tildi');
+      state.cookies = t.c; state.alt = t.alt; state.warp = !!t.w;
       return r;
     } catch (e) { last = e; if (!BLOCKED.test(e.message)) throw explainYtdlp(e); }
   }
@@ -220,10 +228,10 @@ async function download(job, dir, quality, allowLow = false) {
   for (const st of strategies) {
     for (const f of fs.readdirSync(dir)) if (f.startsWith('source.')) fs.rmSync(path.join(dir, f), { force: true });
     try {
-      try { await runYt([...ytArgs(state.cookies !== false), ...st.args, ...common], { onLine: progress }); }
+      try { await runYt([...ytArgs(state.cookies !== false, state.warp), ...st.args, ...common], { onLine: progress }); }
       catch (e) {
         // the info call passed without cookies but the media is refused: once more with them
-        if (state.cookies === false && fs.existsSync(COOKIES) && BLOCKED.test(e.message)) { state.cookies = true; await runYt([...ytArgs(true), ...st.args, ...common], { onLine: progress }); }
+        if (state.cookies === false && fs.existsSync(COOKIES) && BLOCKED.test(e.message)) { state.cookies = true; await runYt([...ytArgs(true, state.warp), ...st.args, ...common], { onLine: progress }); }
         else throw e;
       }
       if (st !== strategies[0]) log(`#${job.id}: video "${st.name}" usuli bilan yuklab olindi`);
