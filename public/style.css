@@ -9,7 +9,7 @@
 --spec:inset 0 1px 0 rgba(255,255,255,.22),inset 0 -1px 0 rgba(255,255,255,.04);
 --shadow:0 10px 30px rgba(0,0,0,.35)}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-html{background:var(--bg);overflow:hidden;height:100%;overscroll-behavior:none}
+html{background:var(--bg)}
 html,body{margin:0;color:var(--ink);font:15px/1.42 -apple-system,BlinkMacSystemFont,"SF Pro Text","SF Pro Display","Inter",system-ui,"Segoe UI",Roboto,sans-serif;
   -webkit-font-smoothing:antialiased;-webkit-text-size-adjust:100%;touch-action:pan-x pan-y;overscroll-behavior:none;letter-spacing:-.01em}
 body{background:transparent;height:100%;overflow:hidden;position:fixed;inset:0}

@@ -9,20 +9,7 @@ if (tg) {
 }
 // no pinch / double-tap zoom
 for (const ev of ['gesturestart', 'gesturechange']) document.addEventListener(ev, (e) => e.preventDefault(), { passive: false });
-// iPhone: the whole web page must never be dragged (that moves the header with the logo). Only real scroll areas
-// scroll, and at their top/bottom edge the drag stops there instead of pulling the whole screen.
-const scroller = (el) => { for (; el && el !== document.body; el = el.parentElement) { const st = getComputedStyle(el);
-  if (/(auto|scroll)/.test(st.overflowY) && el.scrollHeight > el.clientHeight + 1) return el; } return null; };
-let touchY = 0;
-document.addEventListener('touchstart', (e) => { touchY = e.touches[0].clientY; }, { passive: true });
-document.addEventListener('touchmove', (e) => {
-  if (e.touches.length > 1) return e.preventDefault();
-  if (e.target.closest('input[type=range], .chart')) return;
-  const sc = scroller(e.target);
-  if (!sc) return e.preventDefault();
-  const dy = e.touches[0].clientY - touchY;
-  if ((dy > 0 && sc.scrollTop <= 0) || (dy < 0 && sc.scrollTop + sc.clientHeight >= sc.scrollHeight - 1)) e.preventDefault();
-}, { passive: false });
+document.addEventListener('touchmove', (e) => { if (e.touches.length > 1) e.preventDefault(); }, { passive: false });
 let lastTap = 0; document.addEventListener('touchend', (e) => { const n = Date.now(); if (n - lastTap < 300 && !e.target.closest('input,textarea,select,video')) e.preventDefault(); lastTap = n; }, { passive: false });
 const $ = (s, r = document) => r.querySelector(s);
 // fixed app shell: the header never moves, only the page under it scrolls (no iOS rubber-band of the whole screen)
