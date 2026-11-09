@@ -315,9 +315,9 @@ function growthCard(g) {
 }
 function stylesCard(list) {
   return `<h2 class="row">${appi('clips', 'linear-gradient(160deg,#ff6b8b,#ff2d55)')}<span>O'rganilgan montaj uslublari</span></h2>
-    <div class="card"><div class="small muted">Bot har yo'nalish bo'yicha so'nggi 90 kunda eng ko'p ko'rilgan Shorts'larni AI'ga ko'rsatadi va montajni ulardan o'rganadi (haftada bir yangilanadi).</div>
-      <div class="row" style="margin-top:10px"><input type="text" id="stNiche" placeholder="Yo'nalish: CS2, Ready or Not, podkast…"><button class="btn sm primary" id="stLearn">O'rganish</button></div></div>
-    ${list.map((g) => `<div class="card"><div class="row"><b class="grow">${esc(g.niche)}</b><span class="small muted">${ago2(g.at)}</span></div>
+    <div class="card"><div class="small muted">Bot har yo'nalish bo'yicha so'nggi 90 kunda eng ko'p ko'rilgan Shorts'larni AI'ga ko'rsatadi va montajni ulardan o'rganadi (haftada bir yangilanadi). <b>@username</b> yoki kanal havolasini yozsangiz — o'sha kanalning eng ko'p ko'rilgan Shorts'laridan o'rganadi.</div>
+      <div class="row" style="margin-top:10px"><input type="text" id="stNiche" placeholder="CS2, Ready or Not… yoki kanal: @username" autocapitalize="off"><button class="btn sm primary" id="stLearn">O'rganish</button></div></div>
+    ${list.map((g) => `<div class="card"><div class="row"><b class="grow">${g.channel ? '📺 ' : ''}${esc(g.niche)}</b><span class="small muted">${ago2(g.at)}</span></div>
       <p class="small">${esc(g.summary)}</p>
       <div class="chips">${[`~${Math.round(g.avgLength)} s`, `${Math.round(g.cutsPerMinute)} kesish/daq`, `hook: ${g.hook}`, `subtitr: ${g.subtitleStyle}`, `zoom: ${g.zoom}`, g.memeText ? 'mem-yozuv' : '', g.soundEffects ? 'effektlar' : ''].filter(Boolean).map((c) => `<span>${esc(c)}</span>`).join('')}</div>
       <details style="margin-top:8px"><summary class="small">Qoidalar va manbalar</summary>

@@ -236,10 +236,11 @@ async function api(req, res, url) {
   }
   if (p === '/api/styles' && m === 'GET') return send(res, 200, require('./src/style').all());
   if (p === '/api/styles' && m === 'POST') {
-    const niche = String(b.niche || '').trim().slice(0, 60); if (!niche) return send(res, 400, { error: 'Yo\'nalishni yozing (masalan: CS2)' });
+    const niche = String(b.niche || '').trim().slice(0, 120); if (!niche) return send(res, 400, { error: 'Yo\'nalishni yozing (masalan: CS2)' });
     if (!yt.connected()) return send(res, 400, { error: 'YouTube kanal ulanmagan' });
     const st = require('./src/style'); db.prepare('DELETE FROM style_guides WHERE key = ?').run(niche.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim());
-    const g = await st.learn(niche); return g ? send(res, 200, g) : send(res, 400, { error: 'O\'rganib bo\'lmadi (mashhur Shorts topilmadi yoki Gemini ulanmagan)' });
+    let g; try { g = await st.learn(niche); } catch (e) { return send(res, 400, { error: e.message }); }
+    return g ? send(res, 200, g) : send(res, 400, { error: 'O\'rganib bo\'lmadi (mashhur Shorts topilmadi yoki Gemini ulanmagan)' });
   }
   if (p === '/api/growth' && m === 'GET') {
     const growth = require('./src/growth');

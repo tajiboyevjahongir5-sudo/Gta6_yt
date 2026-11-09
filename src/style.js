@@ -22,6 +22,29 @@ async function viralShorts(niche, max = 4) {
     .filter((x) => x.duration > 0 && x.duration <= 180).sort((a, b) => b.views - a.views).slice(0, max);
 }
 
+// a channel given as @handle / youtube.com/@handle / channel URL: its own most-viewed Shorts (from its latest ~150 uploads)
+function channelRef(text) {
+  const t = String(text || '').trim();
+  let m = t.match(/youtube\.com\/(@[\w.-]+)/i) || t.match(/^(@[\w.-]+)$/);
+  if (m) return { handle: m[1] };
+  m = t.match(/youtube\.com\/channel\/(UC[\w-]{20,})/i) || t.match(/^(UC[\w-]{20,})$/);
+  return m ? { id: m[1] } : null;
+}
+async function channelShorts(ref, max = 4) {
+  const c = await yt.apiGet('channels?part=snippet,contentDetails&' + (ref.id ? 'id=' + ref.id : 'forHandle=' + encodeURIComponent(ref.handle)));
+  const ch = c.items?.[0]; if (!ch) throw new Error('Kanal topilmadi: ' + (ref.handle || ref.id));
+  const up = ch.contentDetails?.relatedPlaylists?.uploads; const ids = []; let page = '';
+  do { const j = await yt.apiGet(`playlistItems?part=contentDetails&maxResults=50&playlistId=${up}${page ? '&pageToken=' + page : ''}`);
+    for (const it of j.items || []) ids.push(it.contentDetails.videoId); page = j.nextPageToken; } while (page && ids.length < 150);
+  const sec = (d) => { const m = String(d || '').match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/) || []; return (+m[1] || 0) * 3600 + (+m[2] || 0) * 60 + (+m[3] || 0); };
+  const vids = [];
+  for (let i = 0; i < ids.length; i += 50) {
+    const v = await yt.apiGet('videos?part=snippet,statistics,contentDetails&id=' + ids.slice(i, i + 50).join(','));
+    for (const x of v.items || []) vids.push({ id: x.id, title: x.snippet.title, channel: x.snippet.channelTitle, views: +(x.statistics.viewCount || 0), duration: sec(x.contentDetails.duration) });
+  }
+  return { title: ch.snippet.title, handle: ch.snippet.customUrl || ref.handle || '', shorts: vids.filter((x) => x.duration > 0 && x.duration <= 180).sort((a, b) => b.views - a.views).slice(0, max) };
+}
+
 const SCHEMA = { type: 'object', additionalProperties: false,
   required: ['summary', 'hook', 'avgLength', 'cutsPerMinute', 'subtitleStyle', 'zoom', 'memeText', 'soundEffects', 'climaxFullscreen', 'momentRules', 'editingRules', 'titleStyle', 'notPossibleYet'],
   properties: {
@@ -48,12 +71,17 @@ async function learn(niche) {
   if (row && Date.now() - row.at < WEEK) return JSON.parse(row.data);
   if (learning[key]) return learning[key];
   learning[key] = (async () => {
-    const shorts = await viralShorts(niche);
-    if (shorts.length < 2) { log(`Montaj uslubi: "${niche}" bo'yicha mashhur Shorts topilmadi`, 'warn'); return row ? JSON.parse(row.data) : null; }
+    const ref = channelRef(niche);
+    let shorts, label = niche, intro;
+    if (ref) {
+      const c = await channelShorts(ref); shorts = c.shorts; label = `${c.title}${c.handle ? ' (' + c.handle + ')' : ''}`;
+      intro = `These are the most-viewed YouTube Shorts of the channel "${c.title}". Learn THIS channel's editing style:`;
+    } else { shorts = await viralShorts(niche); intro = `These are the most-viewed YouTube Shorts of the last 90 days in the niche "${niche}":`; }
+    if (shorts.length < 2) { log(`Montaj uslubi: "${niche}" bo'yicha mashhur Shorts topilmadi`, 'warn'); if (ref) throw new Error('Bu kanalda Shorts topilmadi'); return row ? JSON.parse(row.data) : null; }
     const r = await ai.generateJSON({
       schema: SCHEMA, quality: 'high',
       parts: [
-        { text: `These are the most-viewed YouTube Shorts of the last 90 days in the niche "${niche}":` },
+        { text: intro },
         ...shorts.flatMap((s, i) => [{ text: `#${i + 1} "${s.title}" — ${s.channel}, ${s.views} views, ${s.duration}s` }, { youtube: `https://www.youtube.com/watch?v=${s.id}` }]),
         { text: `Watch every one of them closely, like a professional short-form editor studying competitors. ` +
           `Work out what they have in common: how the first 1-2 seconds hook the viewer, length, cut pace, layout, captions (style, position), ` +
@@ -62,12 +90,12 @@ async function learn(niche) {
       ],
     });
     const g = r?.data; if (!g) return row ? JSON.parse(row.data) : null;
-    g.niche = niche; g.sources = shorts; g.at = Date.now();
+    g.niche = label; g.channel = !!ref; g.sources = shorts; g.at = Date.now();
     g.momentRules = (g.momentRules || []).slice(0, 6); g.editingRules = (g.editingRules || []).slice(0, 6);
     db.prepare('INSERT OR REPLACE INTO style_guides (key, niche, data, at) VALUES (?, ?, ?, ?)').run(key, niche, JSON.stringify(g), Date.now());
-    log(`Montaj uslubi o'rganildi: "${niche}" — ${shorts.length} ta mashhur Shorts (${shorts.map((s) => Math.round(s.views / 1000) + 'K').join(', ')} ko'rish)`);
+    log(`Montaj uslubi o'rganildi: "${label}" — ${shorts.length} ta mashhur Shorts (${shorts.map((s) => Math.round(s.views / 1000) + 'K').join(', ')} ko'rish)`);
     return g;
-  })().catch((e) => { log('Montaj uslubini o\'rganib bo\'lmadi: ' + e.message.slice(0, 200), 'warn'); return row ? JSON.parse(row.data) : null; })
+  })().catch((e) => { log('Montaj uslubini o\'rganib bo\'lmadi: ' + e.message.slice(0, 200), 'warn'); if (channelRef(niche)) throw e; return row ? JSON.parse(row.data) : null; })
     .finally(() => { delete learning[key]; });
   return learning[key];
 }
@@ -94,4 +122,4 @@ function guess(text) {
   return null;
 }
 
-module.exports = { learn, overrides, rulesText, all, guess };
+module.exports = { channelRef, learn, overrides, rulesText, all, guess };
