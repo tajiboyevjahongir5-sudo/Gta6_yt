@@ -20,6 +20,7 @@ frame_no = {}
 cascades = [cv2.CascadeClassifier(cv2.data.haarcascades + f) for f in
             ("haarcascade_frontalface_default.xml", "haarcascade_frontalface_alt2.xml")]
 
+clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
 faces = []  # (frame index, x, y, w, h)
 smalls = {}
 used = 0
@@ -37,12 +38,17 @@ for k in range(a.samples):
     used += 1
     scale = 720 / H if H > 720 else 1.0  # detect on <=720p for speed
     small = cv2.resize(frame, None, fx=scale, fy=scale) if scale != 1.0 else frame
-    gray = cv2.equalizeHist(cv2.cvtColor(small, cv2.COLOR_BGR2GRAY))
+    # Plain grey + CLAHE (local contrast). Whole-frame histogram equalisation is wrong here: in a dark game it blows
+    # the black areas up into noise, which gives false "faces" and hides the real one in the bright webcam.
+    # Both detectors run on both pictures and all their hits count (the clustering below keeps the steady one).
+    plain = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
     found = []
-    for c in cascades:
-        found = c.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=6, minSize=(int(0.04 * gray.shape[0]),) * 2)
-        if len(found):
-            break
+    for im in (plain, clahe.apply(plain)):
+        for c in cascades:
+            for (x, y, w, h) in c.detectMultiScale(im, scaleFactor=1.1, minNeighbors=6, minSize=(int(0.04 * im.shape[0]),) * 2):
+                # the same face found twice (other detector / other picture) counts once
+                if not any(abs(x - fx) < 0.3 * w and abs(y - fy) < 0.3 * h and 0.7 < w / fw < 1.4 for (fx, fy, fw, fh) in found):
+                    found.append((x, y, w, h))
     for (x, y, w, h) in found:
         faces.append((k, x / scale, y / scale, w / scale, h / scale))
     # keep a small copy: the border statistics are computed later only from frames where the webcam is on screen
