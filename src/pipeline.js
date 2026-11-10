@@ -339,6 +339,20 @@ function chooseMoments(candidates, aiRes, settings) {
 
 function creditLine(job) { return job.author ? `🎬 Original video: ${job.author}${job.url ? ' — ' + job.url : ''}` : ''; }
 
+// Re-write a source that has damaged packets: video is copied as is, audio is decoded leniently (bad packets are
+// dropped) and encoded again, timestamps regenerated. Takes seconds to a minute; the file keeps its name.
+async function repairSource(src, dir) {
+  const tmp = path.join(dir, 'repaired' + (path.extname(src) || '.mp4'));
+  const base = ['-y', '-hide_banner', '-loglevel', 'error', '-err_detect', 'ignore_err', '-fflags', '+discardcorrupt+genpts', '-i', src,
+    '-map', '0:v:0', '-map', '0:a:0?', '-max_error_rate', '1'];
+  try { await run(FFMPEG, [...base, '-c:v', 'copy', '-c:a', 'aac', '-b:a', '160k', '-ac', '2', '-movflags', '+faststart', tmp], { timeoutMs: 30 * 60000 }); }
+  catch (e) {
+    // the video stream is damaged too: re-encode it as well (slower, but the job goes through)
+    await run(FFMPEG, [...base, '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '160k', '-ac', '2', '-movflags', '+faststart', tmp], { timeoutMs: 120 * 60000 });
+  }
+  if (!fs.existsSync(tmp) || fs.statSync(tmp).size < 10000) throw new Error('Manba fayli buzuq va uni tuzatib bo\'lmadi — videoni qaytadan yuklang');
+  fs.renameSync(tmp, src);
+}
 // everything that is expensive to find out about a source (loudness/motion scan, the AI listening to the audio, webcam,
 // reactions, the AI ranking). Its result is saved in the job's work folder, so a restart in the middle of a job
 // (a new deploy) continues from the montage instead of spending the time and the AI quota again.
@@ -438,7 +452,16 @@ async function processJob(job) {
     for (const c of db.prepare("SELECT * FROM clips WHERE job_id = ? AND status = 'draft'").all(job.id)) for (const f of [c.thumb]) if (f) fs.rmSync(f, { force: true });
     db.prepare("DELETE FROM clips WHERE job_id = ? AND status = 'draft'").run(job.id);
   } else {
-    an = await analyzeSource(job, src, dir, settings, meta, transcript);
+    try { an = await analyzeSource(job, src, dir, settings, meta, transcript); }
+    catch (e) {
+      // a damaged audio/video packet in the source (common in files re-muxed by downloader bots) stops ffmpeg:
+      // rebuild the file once, skipping the damaged packets, and go on
+      if (!/Invalid data found|Error submitting packet|Conversion failed|corrupt|error while decoding/i.test(e.message)) throw e;
+      setJob(job.id, { step: 'Manba fayli tuzatilmoqda' });
+      await repairSource(src, dir);
+      log(`#${job.id}: manba faylida buzuq bo'lak bor edi — tuzatildi, davom etmoqda`, 'warn');
+      an = await analyzeSource(job, src, dir, settings, meta, transcript);
+    }
     try { fs.writeFileSync(ckFile, JSON.stringify(an)); } catch (e) { /* only a shortcut */ }
   }
   const { info, score, aiRes, facecam } = an; const candidates = an.candidates;
