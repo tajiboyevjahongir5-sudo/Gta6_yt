@@ -339,19 +339,44 @@ function chooseMoments(candidates, aiRes, settings) {
 
 function creditLine(job) { return job.author ? `🎬 Original video: ${job.author}${job.url ? ' — ' + job.url : ''}` : ''; }
 
-// Re-write a source that has damaged packets: video is copied as is, audio is decoded leniently (bad packets are
-// dropped) and encoded again, timestamps regenerated. Takes seconds to a minute; the file keeps its name.
-async function repairSource(src, dir) {
-  const tmp = path.join(dir, 'repaired' + (path.extname(src) || '.mp4'));
-  const base = ['-y', '-hide_banner', '-loglevel', 'error', '-err_detect', 'ignore_err', '-fflags', '+discardcorrupt+genpts', '-i', src,
-    '-map', '0:v:0', '-map', '0:a:0?', '-max_error_rate', '1'];
-  try { await run(FFMPEG, [...base, '-c:v', 'copy', '-c:a', 'aac', '-b:a', '160k', '-ac', '2', '-movflags', '+faststart', tmp], { timeoutMs: 30 * 60000 }); }
-  catch (e) {
-    // the video stream is damaged too: re-encode it as well (slower, but the job goes through)
-    await run(FFMPEG, [...base, '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '160k', '-ac', '2', '-movflags', '+faststart', tmp], { timeoutMs: 120 * 60000 });
-  }
+// Salvage a source that has damaged stretches (ffmpeg aborts on them). The file is re-encoded minute by minute,
+// each piece on its own: a piece that fails is split into 10-second and then 2-second pieces, and only the pieces
+// that still fail are left out. So a few damaged seconds cost a few seconds, not the whole video.
+async function repairSource(src, dir, { seg = 60 } = {}) {
+  const info = await require('./analyze').probe(src);
+  if (!info.duration || !info.width) throw new Error('Manba fayli o\'qilmadi — videoni qaytadan yuklang');
+  const W = info.width - (info.width % 2), H = info.height - (info.height % 2);
+  const out = path.join(dir, 'salvage'); fs.rmSync(out, { recursive: true, force: true }); fs.mkdirSync(out, { recursive: true });
+  const pieces = []; let lost = 0, n = 0;
+  const encode = async (start, len) => {
+    const f = path.join(out, `p${String(n++).padStart(5, '0')}.ts`);
+    await run(FFMPEG, ['-y', '-hide_banner', '-loglevel', 'error', '-err_detect', 'ignore_err', '-ss', start.toFixed(3), '-t', len.toFixed(3), '-i', src,
+      '-map', '0:v:0', '-map', '0:a:0?', '-max_error_rate', '1',
+      '-vf', `scale=${W}:${H},fps=30,format=yuv420p,setsar=1`, '-af', 'aresample=48000,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo',
+      '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-c:a', 'aac', '-b:a', '160k', '-f', 'mpegts', f], { timeoutMs: 20 * 60000 });
+    if (!fs.existsSync(f) || fs.statSync(f).size < 2000) throw new Error('bo\'sh bo\'lak');
+    return f;
+  };
+  const take = async (start, len, steps) => {
+    try { pieces.push(await encode(start, len)); }
+    catch (e) {
+      const rest = steps.filter((x) => x < len - 0.01); const step = rest[0];
+      if (!step) { lost += len; return; }                     // still broken at the smallest size: leave it out
+      for (let t = start; t < start + len - 0.01; t += step) await take(t, Math.min(step, start + len - t), rest.slice(1));
+    }
+  };
+  for (let t = 0; t < info.duration - 0.05; t += seg) await take(t, Math.min(seg, info.duration - t), [10, 2]);
+  if (!pieces.length || lost > info.duration * 0.5) throw new Error('Manba fayli juda buzuq (yarmidan ko\'pi o\'qilmaydi) — videoni qaytadan yuklang');
+  const list = path.join(out, 'list.txt');
+  fs.writeFileSync(list, pieces.map((f) => `file '${f.replace(/'/g, "'\\''")}'`).join('\n'));
+  const tmp = path.join(dir, 'repaired.mp4');
+  await run(FFMPEG, ['-y', '-hide_banner', '-loglevel', 'error', '-f', 'concat', '-safe', '0', '-i', list, '-c', 'copy', '-bsf:a', 'aac_adtstoasc', '-movflags', '+faststart', tmp], { timeoutMs: 20 * 60000 });
+  fs.rmSync(out, { recursive: true, force: true });
   if (!fs.existsSync(tmp) || fs.statSync(tmp).size < 10000) throw new Error('Manba fayli buzuq va uni tuzatib bo\'lmadi — videoni qaytadan yuklang');
-  fs.renameSync(tmp, src);
+  const dest = src.replace(/\.[^.]+$/, '') + '.mp4';
+  if (dest !== src) fs.rmSync(src, { force: true });
+  fs.renameSync(tmp, dest);
+  return { file: dest, lost: Math.round(lost) };
 }
 // everything that is expensive to find out about a source (loudness/motion scan, the AI listening to the audio, webcam,
 // reactions, the AI ranking). Its result is saved in the job's work folder, so a restart in the middle of a job
@@ -438,7 +463,7 @@ async function processJob(job) {
   const outDir = path.join(OUT_DIR, String(job.id)); fs.mkdirSync(outDir, { recursive: true });
 
   setJob(job.id, { status: 'downloading', step: 'Yuklab olinmoqda', progress: 0, error: null });
-  const { file: src, meta, transcript } = await download(job, dir, settings.quality, settings.lowQualityFallback);
+  let { file: src, meta, transcript } = await download(job, dir, settings.quality, settings.lowQualityFallback);
   job = db.prepare('SELECT * FROM jobs WHERE id = ?').get(job.id);
   const source = job.source_id ? db.prepare('SELECT * FROM sources WHERE id = ?').get(job.source_id) : null;
   if (source?.credit) job.author = source.credit;
@@ -457,9 +482,11 @@ async function processJob(job) {
       // a damaged audio/video packet in the source (common in files re-muxed by downloader bots) stops ffmpeg:
       // rebuild the file once, skipping the damaged packets, and go on
       if (!/Invalid data found|Error submitting packet|Conversion failed|corrupt|error while decoding/i.test(e.message)) throw e;
-      setJob(job.id, { step: 'Manba fayli tuzatilmoqda' });
-      await repairSource(src, dir);
-      log(`#${job.id}: manba faylida buzuq bo'lak bor edi — tuzatildi, davom etmoqda`, 'warn');
+      setJob(job.id, { step: 'Manba fayli tuzatilmoqda (buzuq bo\'laklar olib tashlanmoqda)' });
+      const fixed = await repairSource(src, dir);
+      src = fixed.file;
+      try { const rs = path.join(dir, 'resume.json'); const r = JSON.parse(fs.readFileSync(rs, 'utf8')); r.file = path.basename(src); fs.writeFileSync(rs, JSON.stringify(r)); } catch (er) {}
+      log(`#${job.id}: manba faylida buzuq bo'laklar bor edi — tuzatildi${fixed.lost ? ` (${fixed.lost} s o'qib bo'lmadi va olib tashlandi)` : ''}, davom etmoqda`, 'warn');
       an = await analyzeSource(job, src, dir, settings, meta, transcript);
     }
     try { fs.writeFileSync(ckFile, JSON.stringify(an)); } catch (e) { /* only a shortcut */ }
