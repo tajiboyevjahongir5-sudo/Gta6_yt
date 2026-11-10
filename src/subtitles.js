@@ -443,9 +443,64 @@ async function detectFacecam(src) {
   let j;
   try { const { out } = await run(PY, [FACECAM, src], { timeoutMs: 10 * 60000 }); j = JSON.parse(out); }
   catch (e) { log('Webkamera aniqlanmadi: ' + e.message.slice(0, 200), 'warn'); return null; }
-  if (!j.found) return null;
+  if (!j.found && /fills the frame|still picture/.test(j.reason || '')) return null; // whole-screen face cam / a photo: no split layout
+  if (!j.found) {
+    // the face detector missed it (small or round cam, face turned away, headset, dark room): let the AI look
+    log(`Webkamera: yuz detektori topmadi (${j.reason || 'yuz yo\'q'}${j.hits != null ? `, ${j.hits}/${j.samples} kadr` : ''}) — AI kadrlarga qaraydi`);
+    try { const v = await visionFind(src, j); if (v) return v; } catch (e) { log('Webkamera: AI qidiruvi ishlamadi: ' + e.message.slice(0, 160), 'warn'); }
+    return null;
+  }
   try { await visionBox(src, j); } catch (e) { log('Webkamera: AI ramka tekshiruvi ishlamadi: ' + e.message.slice(0, 160), 'warn'); }
   return j;
+}
+
+// No steady face found by the detector: the AI gets three frames from different parts of the video and marks the
+// streamer's webcam in each. It only counts when at least two frames agree on (nearly) the same rectangle —
+// a webcam overlay stays put, things in the game don't.
+async function visionFind(src, j) {
+  const ai = require('./ai');
+  if (!ai.providers().includes('gemini') || !j.width || !j.height) return null;
+  const os = require('os');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'camf-'));
+  try {
+    const { out } = await run(require('./config').FFPROBE, ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', src]);
+    const dur = parseFloat(out) || 0; if (dur < 5) return null;
+    const boxes = [];
+    for (const [i, frac] of [0.2, 0.5, 0.8].entries()) {
+      const f = path.join(dir, `f${i}.jpg`);
+      await run(FFMPEG, ['-y', '-v', 'error', '-ss', String(dur * frac), '-i', src, '-frames:v', '1', '-vf', 'scale=1280:-2', '-q:v', '3', f]);
+      if (!fs.existsSync(f)) continue;
+      const r = await ai.generateJSON({
+        schema: { type: 'object', additionalProperties: false, required: ['found', 'ymin', 'xmin', 'ymax', 'xmax'],
+          properties: { found: { type: 'boolean' }, ymin: { type: 'number' }, xmin: { type: 'number' }, ymax: { type: 'number' }, xmax: { type: 'number' } } },
+        parts: [{ image: f }, { text:
+          `A frame from a gameplay video or stream (${j.width}x${j.height}). Is there a streamer WEBCAM overlay in it: a live camera picture of a real ` +
+          `person (the player), laid over the game, usually in a corner, rectangular or round? Game characters, avatars, profile pictures, ` +
+          `kill-feed icons and drawings do NOT count. If yes: found=true and the bounding box of the camera picture only (without its frame/border, ` +
+          `without game graphics; for a round cam the square around the circle), exact edges, on a 0-1000 scale of the frame (ymin, xmin, ymax, xmax). ` +
+          `If there is no real webcam, found=false and zeros.` }],
+      });
+      const b = r?.data;
+      if (b?.found && b.xmax > b.xmin && b.ymax > b.ymin) boxes.push({ x0: b.xmin / 1000 * j.width, x1: b.xmax / 1000 * j.width, y0: b.ymin / 1000 * j.height, y1: b.ymax / 1000 * j.height });
+    }
+    const iou = (a, b) => { const w = Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0), h = Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0);
+      if (w <= 0 || h <= 0) return 0; const i = w * h; return i / ((a.x1 - a.x0) * (a.y1 - a.y0) + (b.x1 - b.x0) * (b.y1 - b.y0) - i); };
+    let pair = null;
+    for (let a = 0; a < boxes.length; a++) for (let b = a + 1; b < boxes.length; b++) if (iou(boxes[a], boxes[b]) >= 0.6 && !pair) pair = [boxes[a], boxes[b]];
+    if (!pair) { log(`Webkamera: AI ${boxes.length}/3 kadrda ko'rdi, lekin bir joyda emas — webkamera yo'q deb olindi`); return null; }
+    // the common part of the two boxes, a little inside (never shows the border)
+    const inX = 0.006 * j.width, inY = 0.006 * j.height, edge = (v, max, d) => (v < 0.025 * max ? 0 : max - v < 0.025 * max ? max : v + d);
+    const x0 = edge(Math.max(pair[0].x0, pair[1].x0), j.width, inX), x1 = edge(Math.min(pair[0].x1, pair[1].x1), j.width, -inX);
+    const y0 = edge(Math.max(pair[0].y0, pair[1].y0), j.height, inY), y1 = edge(Math.min(pair[0].y1, pair[1].y1), j.height, -inY);
+    const w = x1 - x0, h = y1 - y0, area = (w * h) / (j.width * j.height);
+    if (area < 0.012 || area > 0.5 || w < 80 || h < 80) { log(`Webkamera: AI ramkasi mos emas (kadrning ${(area * 100).toFixed(1)}%)`); return null; }
+    // where the face most likely is inside a webcam picture: upper middle
+    const res = { found: true, x: Math.round(x0), y: Math.round(y0), w: Math.round(w), h: Math.round(h),
+      face: [Math.round(x0 + w * 0.33), Math.round(y0 + h * 0.15), Math.round(w * 0.34), Math.round(h * 0.45)],
+      border: [false, false, false, false], hits: boxes.length, samples: 3, width: j.width, height: j.height, ai: true, aiOnly: true };
+    log(`Webkamera: AI topdi ${res.x},${res.y} ${res.w}x${res.h} (${boxes.length}/3 kadrda)`);
+    return res;
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }
 
 // the AI looks at frames and marks the webcam rectangle (it "sees" where the camera picture ends and gameplay begins,
