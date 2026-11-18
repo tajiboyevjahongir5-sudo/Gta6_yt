@@ -24,7 +24,7 @@ async function callClaude({ parts, schema, effort = 'medium', maxTokens = 10000 
     model: AI_MODEL, max_tokens: maxTokens,
     betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default',
     output_config: { effort, format: { type: 'json_schema', schema } },
-    messages: [{ role: 'user', content: parts.filter((p) => !p.audio && !p.youtube).map((p) => (p.image
+    messages: [{ role: 'user', content: parts.filter((p) => !p.audio && !p.youtube && !p.video).map((p) => (p.image
       ? { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: b64(p.image) } } : { type: 'text', text: p.text })) }],
   });
   if (res.stop_reason === 'refusal') throw new Error('Claude so\'rovni rad etdi');
@@ -53,6 +53,7 @@ async function callGemini({ parts, schema, youtube, quality }) {
   const key = geminiKey(); if (!key) throw new Error('Gemini kaliti yo\'q');
   const gparts = parts.map((p) => (p.image ? { inlineData: { mimeType: 'image/jpeg', data: b64(p.image) } }
     : p.audio ? { inlineData: { mimeType: p.mime || 'audio/wav', data: b64(p.audio) } }
+    : p.video ? { inlineData: { mimeType: 'video/mp4', data: b64(p.video) } }
     : p.youtube ? { fileData: { fileUri: p.youtube }, ...(p.fps ? { videoMetadata: { fps: p.fps } } : {}) } : { text: p.text }));
   const build = (withVideo) => ({
     contents: [{ role: 'user', parts: withVideo && youtube

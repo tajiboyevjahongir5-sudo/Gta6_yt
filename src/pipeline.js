@@ -152,6 +152,7 @@ const ai = require('./ai');
 const yt = require('./youtube');
 const tg = require('./telegram');
 const style = require('./style');
+const editor = require('./editor');
 
 // ---------------- jobs ----------------
 function normalizeVideoUrl(url) { return String(url).trim(); }
@@ -497,10 +498,11 @@ async function processJob(job) {
   const video = aiRes?.video || tpl.video;
   setJob(job.id, { meta: { ...meta, subject: video.subject, summary: video.summary } });
   // editor skill: how the viral Shorts of this niche are edited (learned once a week per niche) -> this job's editing
+  let learned = null;
   if (settings.learnStyle && settings.makeShorts && video.subject) {
     setJob(job.id, { step: 'Mashhur Shorts montaji o\'rganilmoqda' });
     try {
-      const g = await style.learn(video.subject);
+      const g = await style.learn(video.subject); learned = g;
       const o = style.overrides(g);
       if (Object.keys(o).length) { Object.assign(settings, o); log(`#${job.id}: "${g.niche}" uslubi qo'llandi — ${JSON.stringify(o)}`); }
     } catch (e) { log('Uslub qo\'llanmadi: ' + e.message.slice(0, 160), 'warn'); }
@@ -540,14 +542,32 @@ async function processJob(job) {
   }
   if (settings.makeShorts) {
     for (let i = 0; i < Math.min(settings.shortsPerVideo, picked.length); i++) {
-      const m = picked[i]; const title = m.shortTitle || tpl.shortTitle(i);
+      const m = picked[i]; let title = m.shortTitle || tpl.shortTitle(i);
       const out = path.join(outDir, `short_${i + 1}.mp4`); const thumb = path.join(outDir, `short_${i + 1}.jpg`);
       if (kept(out)) { done++; continue; }
       const peak = m.peak ?? (m.start + m.end) / 2;
       const asr = { model: settings.asrModel, lang: settings.subtitleLang, to: settings.language,
         context: { title: meta.title || job.title, subject: video.subject, terms: [...new Set([video.subject, ...(meta.tags || []), ...(video.hashtags || [])].filter(Boolean))] } };
       let s, words;
-      if (settings.storyShorts && info.duration > 150 && score) {
+      // 1) the AI editor watches the stretch and decides the cut (falls back to the rules below if it can't)
+      let plan = null;
+      if (settings.aiEditor && info.duration > 75) {
+        setJob(job.id, { step: `AI montajchi Shorts #${i + 1} ni rejalashtirmoqda` });
+        try {
+          const g = learned || style.guess([meta.title, job.title, video.subject, settings.game].filter(Boolean).join(' '));
+          plan = await editor.planShort({ src, dir, peak, duration: info.duration, heard: m.heard, styleRules: style.rulesText(g),
+            title: meta.title || job.title, subject: video.subject, target: Math.max(30, settings.shortTarget || 50) });
+        } catch (e) { log('AI montajchi ishlamadi: ' + e.message.slice(0, 160), 'warn'); }
+      }
+      if (plan) {
+        const parts = plan.parts; const base = parts[0].start;
+        const rel = parts.map((p) => ({ start: +(p.start - base).toFixed(2), end: +(p.end - base).toFixed(2) }));
+        const outTime = (t) => { let acc = 0; for (const p of parts) { if (t >= p.start && t <= p.end) return acc + (t - p.start); acc += p.end - p.start; } return null; };
+        s = { ...m, start: base, end: parts[parts.length - 1].end, peak: plan.peak, peakOut: outTime(plan.peak) ?? 0, hookOut: outTime(plan.hook), parts: rel,
+          meme: plan.meme || m.meme, story: plan.story, plan: parts.map((p) => p.why) };
+        if (plan.title) title = plan.title;
+        words = settings.subtitles ? await subs.transcribe(src, base, s.end - base, dir, { ...asr, select: rel.map((p) => `between(t,${p.start.toFixed(2)},${p.end.toFixed(2)})`).join('+') }) : [];
+      } else if (settings.storyShorts && info.duration > 150 && score) {
         // story Short: the build-up before the climax with the dead time cut out (jump cuts), ending on the reaction
         // with the subscribe card at the end, keep ~3.5 s more after the climax so the reaction isn't covered
         // the story: from where it starts (setup the AI heard, else up to 2.5 min back) through the key moment and on
@@ -587,7 +607,7 @@ async function processJob(job) {
       let hooked = false;
       if (settings.hook) {
         const backup = out + '.nohook.mp4'; fs.copyFileSync(out, backup);
-        try { hooked = await render.addHook(out, s.peakOut ?? ((s.peak ?? s.start) - s.start), dir); } catch (e) { log('Hook qo\'shilmadi: ' + e.message.slice(0, 160), 'warn'); }
+        try { hooked = await render.addHook(out, s.hookOut ?? s.peakOut ?? ((s.peak ?? s.start) - s.start), dir); } catch (e) { log('Hook qo\'shilmadi: ' + e.message.slice(0, 160), 'warn'); }
         if (hooked && !(await playable(out))) { fs.copyFileSync(backup, out); hooked = false; log(`#${job.id}: hook'li video buzuq chiqdi, hook'siz varianti olindi`, 'warn'); }
         fs.rmSync(backup, { force: true });
       }

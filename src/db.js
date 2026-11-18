@@ -60,6 +60,8 @@ const DEFAULTS = {
   keepClipDays: 7,             // a published clip's video file is deleted from the server after this many days
   keepSource: false,           // delete downloaded stream after rendering
   useAI: true,
+  aiEditor: true,              // the AI watches the stretch around each moment and decides the cut itself (Gemini)
+  editorRules: '',             // the owner's own editing rules for the AI editor, one per line
   learnStyle: true,            // study the most-viewed Shorts of each niche and edit like them (Gemini watches them)
   aiListen: true,              // the AI listens to the whole audio to find laughs, hype, jokes (Gemini)
   camReactions: true,          // streamer webcam movement raises moments with a strong reaction

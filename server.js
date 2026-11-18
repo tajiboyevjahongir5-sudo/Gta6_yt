@@ -221,13 +221,22 @@ async function api(req, res, url) {
     if (mm[2] === 'fix') { try { await require('./src/render').makeCompatible(c.file, true); } catch (e) { return send(res, 500, { error: 'Tuzatib bo\'lmadi: ' + e.message.slice(-300) }); } }
     return send(res, 200, await require('./src/render').diagnose(c.file));
   }
+  if (p === '/api/feedback/reasons' && m === 'GET') {
+    const R = require('./src/editor').REASONS; return send(res, 200, Object.entries(R).map(([k, v]) => ({ key: k, uz: v.uz })));
+  }
   if ((mm = p.match(/^\/api\/clips\/(\d+)\/(approve|reject|now|rethumb)$/)) && m === 'POST') {
     const id = +mm[1]; const c = parseClip(db.prepare('SELECT * FROM clips WHERE id = ?').get(id));
     if (!c) return send(res, 404, { error: 'Topilmadi' });
     if (mm[2] !== 'rethumb' && ['published', 'uploading'].includes(c.status)) return send(res, 409, { error: 'Klip allaqachon yuklangan' });
     if (mm[2] === 'approve') return send(res, 200, { scheduled_at: pipeline.scheduleClip(id) });
     if (mm[2] === 'now') return send(res, 200, { scheduled_at: pipeline.scheduleClip(id, true) });
-    if (mm[2] === 'reject') { updateRow('clips', id, { status: 'rejected' }); return send(res, 200, { ok: true }); }
+    if (mm[2] === 'reject') {
+      updateRow('clips', id, { status: 'rejected' });
+      const R = require('./src/editor').REASONS;
+      for (const r of [].concat(b.reasons || [])) if (R[r]) require('./src/editor').addFeedback(id, r, b.note);
+      if (!(b.reasons || []).length && b.note) require('./src/editor').addFeedback(id, 'other', b.note);
+      return send(res, 200, { ok: true });
+    }
     // thumbnail text changed: redraw it from the compiled video
     if (c.kind !== 'long' || !c.file || !fs.existsSync(c.file)) return send(res, 400, { error: 'Prevyu faqat kompilyatsiya uchun' });
     const render = require('./src/render'); const s = getSettings();
@@ -485,12 +494,21 @@ const botHandlers = {
     return 'Havola yuboring yoki /yordam';
   },
   async onCallback(data) {
-    const [act, id] = data.split(':'); const c = db.prepare('SELECT status FROM clips WHERE id = ?').get(+id);
+    const [act, id, why] = data.split(':');
+    if (act === 'why') { require('./src/editor').addFeedback(+id, why); return '👍 Rahmat, keyingi montajlarda hisobga olinadi'; }
+    const c = db.prepare('SELECT status FROM clips WHERE id = ?').get(+id);
     if (!c) return 'Klip topilmadi';
     if (['published', 'uploading'].includes(c.status)) return 'Allaqachon yuklangan';
     if (act === 'ok') { const t = pipeline.scheduleClip(+id); return '✅ Rejalashtirildi: ' + new Date(t + 5 * 3600000).toISOString().slice(5, 16).replace('T', ' '); }
     if (act === 'now') { pipeline.scheduleClip(+id, true); return '🚀 Bir daqiqada yuklanadi'; }
-    if (act === 'no') { updateRow('clips', +id, { status: 'rejected' }); return '❌ Rad etildi'; }
+    if (act === 'no') {
+      updateRow('clips', +id, { status: 'rejected' });
+      // ask why, so the AI editor learns what not to do again
+      const R = require('./src/editor').REASONS; const keys = Object.keys(R);
+      const rows = []; for (let k = 0; k < keys.length; k += 2) rows.push(keys.slice(k, k + 2).map((r) => ({ text: R[r].uz, callback_data: `why:${id}:${r}` })));
+      tg.notifyAdmins('❌ Rad etildi. Nima yoqmadi? (bot keyingi montajlarda hisobga oladi)', { reply_markup: { inline_keyboard: rows } }).catch(() => {});
+      return '❌ Rad etildi';
+    }
     return 'OK';
   },
 };

@@ -188,6 +188,25 @@ async function clips() {
   bindCommon();
 }
 
+// rejecting asks why (several answers allowed): the AI editor learns what not to do again
+async function rejectWithReason(id) {
+  let reasons = [];
+  try { reasons = await api('/api/feedback/reasons'); } catch (e) {}
+  $('#sheetBody').innerHTML = `<div class="row" style="margin-bottom:6px"><b class="grow">Nima yoqmadi?</b>${xBtn}</div>
+    <p class="small muted">Belgilang — AI montajchi keyingi Shorts'larda shu xatoni qaytarmaslikka harakat qiladi.</p>
+    <div class="chips" id="rr">${reasons.map((r) => `<span data-r="${esc(r.key)}" style="cursor:pointer;padding:8px 12px;font-size:14px">${esc(r.uz)}</span>`).join('')}</div>
+    <label class="f">Izoh (ixtiyoriy)</label><textarea id="rnote" style="min-height:70px" placeholder="Masalan: boshida nima bo'layotgani tushunarsiz"></textarea>
+    <button class="btn danger" id="rgo" style="width:100%;margin-top:10px">Rad etish</button>`;
+  $('#sheet').classList.remove('hidden'); $('#x').onclick = closeSheet;
+  const sel = new Set();
+  document.querySelectorAll('#rr [data-r]').forEach((el) => (el.onclick = () => {
+    const k = el.dataset.r; if (sel.has(k)) sel.delete(k); else sel.add(k);
+    el.style.background = sel.has(k) ? 'rgba(255,69,58,.25)' : ''; el.style.borderColor = sel.has(k) ? 'rgba(255,69,58,.6)' : ''; haptic('light');
+  }));
+  $('#rgo').onclick = async (e) => { e.target.disabled = true;
+    try { await api(`/api/clips/${id}/reject`, { method: 'POST', body: { reasons: [...sel], note: $('#rnote').value.trim() } }); toast(sel.size || $('#rnote').value.trim() ? '❌ Rad etildi — sabab saqlandi' : '❌ Rad etildi'); closeSheet(); go(page); }
+    catch (er) { toast(er.message); e.target.disabled = false; } };
+}
 async function openClip(id) {
   const c = await api('/api/clips/' + id);
   const editable = !['published', 'uploading'].includes(c.status);
@@ -201,6 +220,7 @@ async function openClip(id) {
     ${c.url ? `<p><a href="${c.url}" target="_blank" style="color:var(--blue)">YouTube'da ochish ↗</a> · 👁 ${num(c.views)} · 👍 ${num(c.likes)} · 💬 ${num(c.comments)}</p>` : ''}
     ${c.hasFile ? `<p class="small"><a href="${media(id, 'video')}" download="lahza_${id}.mp4" style="color:var(--ink2)">⬇️ Videoni yuklab olish</a>${c.kind === 'long' ? ` · <a href="${media(id, 'thumb')}" download="lahza_${id}.jpg" style="color:var(--ink2)">🖼 Prevyu</a>` : ''}</p>` : ''}
     ${c.error ? `<div class="warnbox">${esc(c.error)}</div>` : ''}
+    ${c.segments?.[0]?.story ? `<div class="card small"><b>🎬 AI montajchi</b><div>${esc(c.segments[0].story)}</div>${(c.segments[0].plan || []).length ? `<ol class="muted" style="padding-left:18px;margin:6px 0 0">${c.segments[0].plan.map((w) => `<li>${esc(w)}</li>`).join('')}</ol>` : ''}</div>` : ''}
     ${c.kind === 'long' ? `<label class="f">Prevyu</label><img id="thumbImg" src="${media(id, 'thumb')}&v=${Date.now()}" style="width:100%;border-radius:10px">
       ${editable ? `<div class="row" style="margin-top:8px"><input type="text" id="tt" class="grow" value="${esc(c.thumb_text)}" placeholder="Prevyu yozuvi"><button class="btn sm" id="rethumb">Yangilash</button></div>` : ''}` : ''}
     <label class="f">Nom (${(c.title || '').length}/100)</label><input type="text" id="ti" maxlength="100" value="${esc(c.title)}" ${editable ? '' : 'disabled'}>
@@ -238,7 +258,7 @@ async function openClip(id) {
     tags: $('#tg').value.split(',').map((s) => s.trim()).filter(Boolean), privacy: $('#pv').value } });
   $('#ok').onclick = async () => { try { await save(); if (c.status !== 'approved') { const r = await api(`/api/clips/${id}/approve`, { method: 'POST' }); toast('Rejalashtirildi: ' + when(r.scheduled_at)); } else toast('Saqlandi'); haptic('medium'); closeSheet(); go(page); } catch (e) { toast(e.message); } };
   $('#now').onclick = async () => { try { await save(); await api(`/api/clips/${id}/now`, { method: 'POST' }); toast('Bir daqiqada yuklanadi'); closeSheet(); go(page); } catch (e) { toast(e.message); } };
-  if ($('#no')) $('#no').onclick = async () => { await api(`/api/clips/${id}/reject`, { method: 'POST' }); toast('Rad etildi'); closeSheet(); go(page); };
+  if ($('#no')) $('#no').onclick = () => rejectWithReason(id);
   if ($('#rethumb')) $('#rethumb').onclick = async (e) => { e.target.disabled = true; try { await api(`/api/clips/${id}/rethumb`, { method: 'POST', body: { text: $('#tt').value } }); $('#thumbImg').src = media(id, 'thumb') + '&v=' + Date.now(); toast('Prevyu yangilandi'); } catch (er) { toast(er.message); } e.target.disabled = false; };
 }
 function closeSheet() { $('#sheet').classList.add('hidden'); $('#sheetBody').innerHTML = ''; }
@@ -523,6 +543,9 @@ async function settings() {
       <div class="row"><div class="grow">${inp('clipBefore', 'Lahzadan oldin (s)', 'number')}</div><div class="grow">${inp('clipAfter', 'Lahzadan keyin (s)', 'number')}</div></div>
       ${sw('facecamLayout', 'Webkamera tepada (Shorts)', 'Videoda streamer kamerasi bo\'lsa: tepada kamera, pastda o\'yin. Kamera bo\'lmasa oddiy ko\'rinish')}
       ${sw('effects', 'Ovoz effektlari', 'Whoosh, boom — eng qiziq joylarda')}
+      ${sw('aiEditor', 'AI montajchi', "AI har bir lahza atrofidagi ~3 daqiqani ko'rib-eshitib, Shorts'ni o'zi kesadi: tayyorlov → asosiy lahza → reaksiya. O'rganilgan uslub, sizning qoidalaringiz va rad etish sabablaringizni hisobga oladi")}
+      <label class="f">Montaj qoidalari (AI montajchi har doim bajaradi, har qatorda bitta)</label>
+      <textarea data-k="editorRules" style="min-height:90px" placeholder="Masalan:&#10;Har doim streamerning reaksiyasi bilan tugat&#10;Menyu va yuklanish ekranlarini ko'rsatma&#10;Hazil gapni o'rtasidan kesma">${esc(s.editorRules || '')}</textarea>
       ${sw('learnStyle', "Mashhur Shorts'lardan montajni o'rganish", "Har yo'nalish (o'yin, mavzu) bo'yicha eng ko'p ko'rilgan Shorts'larni AI ko'rib, uzunlik, hook, zoom, subtitr uslubi va lahza tanlashni ulardan oladi")}
       ${sw('hook', 'Hook: boshida eng qiziq 1 soniya', "Shorts eng qiziq lahzaning 1.3 soniyasi bilan ochiladi, keyin oq chaqnash va voqea boshidan. Tomoshabinni ushlab qoladi")}
       ${sw('aiListen', 'AI butun ovozni tinglaydi', 'Gemini butun efirni eshitib kulgi, hayajon, hazil va kutilmagan joylarni topadi (jim kulgili joylarni ham)')}
